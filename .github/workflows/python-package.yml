@@ -30,7 +30,8 @@ jobs:
         poetry install
     - name: Lint with flake8
       run: |
-        poetry run flake8
+        poetry run flake8 clickhouse_orm/
+        cd tests && poetry run flake8
     - name: Check formatting with black
       run: |
         poetry run black --line-length 120 --check clickhouse_orm/ tests/
@@ -39,7 +40,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       clickhouse:
-        image: yandex/clickhouse
+        image: yandex/clickhouse-server
     strategy:
       fail-fast: false
       matrix:
