@@ -40,7 +40,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       clickhouse:
-        image: yandex/clickhouse-server:20.8
+        image: yandex/clickhouse-server:20.6
         ports:
           - 8123:8123
     strategy:
