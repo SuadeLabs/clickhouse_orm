@@ -41,8 +41,8 @@ jobs:
     services:
       clickhouse:
         image: yandex/clickhouse-server
-        ports: |
-          8123:8123
+        ports:
+          - 8123:8123
     strategy:
       fail-fast: false
       matrix:
