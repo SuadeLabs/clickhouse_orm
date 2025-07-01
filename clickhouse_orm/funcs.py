@@ -186,7 +186,6 @@ class FunctionOperatorsMixin(object):
 
 
 class FMeta(type):
-
     FUNCTION_COMBINATORS = {
         "type_conversion": [
             {"suffix": "OrZero"},
@@ -230,12 +229,23 @@ class FMeta(type):
                 args = comma_join(extra_args)
                 new_sig = comma_join(extra_args)
         # Get default values for args
-        argdefs = tuple(p.default for p in sig.parameters.values() if p.default != Parameter.empty)
+        argdefs = tuple(
+            p.default for p in sig.parameters.values() if p.default != Parameter.empty
+        )
         # Build the new function
         new_code = compile(
-            'def {new_name}({new_sig}): return F("{new_name}", {args})'.format(**locals()), __file__, "exec"
+            'def {new_name}({new_sig}): return F("{new_name}", {args})'.format(
+                **locals()
+            ),
+            __file__,
+            "exec",
         )
-        new_func = FunctionType(code=new_code.co_consts[0], globals=globals(), name=new_name, argdefs=argdefs)
+        new_func = FunctionType(
+            code=new_code.co_consts[0],
+            globals=globals(),
+            name=new_name,
+            argdefs=argdefs,
+        )
         # If base_func was parametric, new_func should be too
         if getattr(base_func, "f_parametric", False):
             new_func = parametric(new_func)
@@ -409,7 +419,7 @@ class F(Cond, FunctionOperatorsMixin, metaclass=FMeta):
 
     @staticmethod
     def toQuarter(d, timezone=NO_VALUE):
-        return F("toQuarter", d, timezone)
+        return F("toQuarter", d, timezone) if timezone else F("toQuarter", d)
 
     @staticmethod
     def toMonth(d, timezone=NO_VALUE):
@@ -421,7 +431,7 @@ class F(Cond, FunctionOperatorsMixin, metaclass=FMeta):
 
     @staticmethod
     def toISOWeek(d, timezone=NO_VALUE):
-        return F("toISOWeek", d, timezone)
+        return F("toISOWeek", d, timezone) if timezone else F("toISOWeek", d)
 
     @staticmethod
     def toDayOfYear(d, timezone=NO_VALUE):
@@ -509,15 +519,19 @@ class F(Cond, FunctionOperatorsMixin, metaclass=FMeta):
 
     @staticmethod
     def toYYYYMM(dt, timezone=NO_VALUE):
-        return F("toYYYYMM", dt, timezone)
+        return F("toYYYYMM", dt, timezone) if timezone else F("toYYYYMM", dt)
 
     @staticmethod
     def toYYYYMMDD(dt, timezone=NO_VALUE):
-        return F("toYYYYMMDD", dt, timezone)
+        return F("toYYYYMMDD", dt, timezone) if timezone else F("toYYYYMMDD", dt)
 
     @staticmethod
     def toYYYYMMDDhhmmss(dt, timezone=NO_VALUE):
-        return F("toYYYYMMDDhhmmss", dt, timezone)
+        return (
+            F("toYYYYMMDDhhmmss", dt, timezone)
+            if timezone
+            else F("toYYYYMMDDhhmmss", dt)
+        )
 
     @staticmethod
     def toRelativeYearNum(d, timezone=NO_VALUE):
@@ -1195,11 +1209,19 @@ class F(Cond, FunctionOperatorsMixin, metaclass=FMeta):
 
     @staticmethod
     def arrayResize(array, size, extender=None):
-        return F("arrayResize", array, size, extender) if extender is not None else F("arrayResize", array, size)
+        return (
+            F("arrayResize", array, size, extender)
+            if extender is not None
+            else F("arrayResize", array, size)
+        )
 
     @staticmethod
     def arraySlice(array, offset, length=None):
-        return F("arraySlice", array, offset, length) if length is not None else F("arraySlice", array, offset)
+        return (
+            F("arraySlice", array, offset, length)
+            if length is not None
+            else F("arraySlice", array, offset)
+        )
 
     @staticmethod
     def arrayUniq(*args):
@@ -1648,6 +1670,16 @@ class F(Cond, FunctionOperatorsMixin, metaclass=FMeta):
     @aggregate
     def varSamp(x):
         return F("varSamp", x)
+
+    @staticmethod
+    @aggregate
+    def stddevPop(expr):
+        return F("stddevPop", expr)
+
+    @staticmethod
+    @aggregate
+    def stddevSamp(expr):
+        return F("stddevSamp", expr)
 
     @staticmethod
     @aggregate

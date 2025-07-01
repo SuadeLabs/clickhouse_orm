@@ -13,7 +13,13 @@ from clickhouse_orm.engines import (
     SummingMergeTree,
     TinyLog,
 )
-from clickhouse_orm.fields import DateField, Int8Field, UInt8Field, UInt16Field, UInt32Field
+from clickhouse_orm.fields import (
+    DateField,
+    Int8Field,
+    UInt8Field,
+    UInt16Field,
+    UInt32Field,
+)
 from clickhouse_orm.funcs import F
 from clickhouse_orm.models import Distributed, DistributedModel, MergeModel, Model
 from clickhouse_orm.system_models import SystemPart
@@ -30,7 +36,7 @@ class _EnginesHelperTestCase(unittest.TestCase):
 
 
 class EnginesTestCase(_EnginesHelperTestCase):
-    def _create_and_insert(self, model_class):
+    def _create_and_insert(self, model_class, **kwargs):
         self.database.create_table(model_class)
         self.database.insert(
             [
@@ -40,6 +46,7 @@ class EnginesTestCase(_EnginesHelperTestCase):
                     event_group=13,
                     event_count=7,
                     event_version=1,
+                    **kwargs,
                 )
             ]
         )
@@ -72,7 +79,9 @@ class EnginesTestCase(_EnginesHelperTestCase):
 
     def test_merge_tree_with_granularity(self):
         class TestModel(SampleModel):
-            engine = MergeTree("date", ("date", "event_id", "event_group"), index_granularity=4096)
+            engine = MergeTree(
+                "date", ("date", "event_id", "event_group"), index_granularity=4096
+            )
 
         self._create_and_insert(TestModel)
 
@@ -98,11 +107,15 @@ class EnginesTestCase(_EnginesHelperTestCase):
                 replica_table_path="/clickhouse/tables/{layer}-{shard}/hits",
             )
         with self.assertRaises(AssertionError):
-            MergeTree("date", ("date", "event_id", "event_group"), replica_name="{replica}")
+            MergeTree(
+                "date", ("date", "event_id", "event_group"), replica_name="{replica}"
+            )
 
     def test_collapsing_merge_tree(self):
         class TestModel(SampleModel):
-            engine = CollapsingMergeTree("date", ("date", "event_id", "event_group"), "event_version")
+            engine = CollapsingMergeTree(
+                "date", ("date", "event_id", "event_group"), "event_version"
+            )
 
         self._create_and_insert(TestModel)
 
@@ -114,7 +127,9 @@ class EnginesTestCase(_EnginesHelperTestCase):
 
     def test_replacing_merge_tree(self):
         class TestModel(SampleModel):
-            engine = ReplacingMergeTree("date", ("date", "event_id", "event_group"), "event_uversion")
+            engine = ReplacingMergeTree(
+                "date", ("date", "event_id", "event_group"), "event_uversion"
+            )
 
         self._create_and_insert(TestModel)
 
@@ -236,16 +251,20 @@ class EnginesTestCase(_EnginesHelperTestCase):
             )
 
         self._create_and_insert(TestModel)
-        self._create_and_insert(TestCollapseModel)
+        self._create_and_insert(TestCollapseModel, sign=1)
 
         # Result order may be different, lets sort manually
         parts = sorted(list(SystemPart.get(self.database)), key=lambda x: x.table)
 
         self.assertEqual(2, len(parts))
         self.assertEqual("testcollapsemodel", parts[0].table)
-        self.assertEqual("(201701, 13)".replace(" ", ""), parts[0].partition.replace(" ", ""))
+        self.assertEqual(
+            "(201701, 13)".replace(" ", ""), parts[0].partition.replace(" ", "")
+        )
         self.assertEqual("testmodel", parts[1].table)
-        self.assertEqual("(201701, 13)".replace(" ", ""), parts[1].partition.replace(" ", ""))
+        self.assertEqual(
+            "(201701, 13)".replace(" ", ""), parts[1].partition.replace(" ", "")
+        )
 
     def test_custom_primary_key(self):
         if self.database.server_version < (18, 1):
@@ -269,13 +288,12 @@ class EnginesTestCase(_EnginesHelperTestCase):
             )
 
         self._create_and_insert(TestModel)
-        self._create_and_insert(TestCollapseModel)
+        self._create_and_insert(TestCollapseModel, sign=1)
 
         self.assertEqual(2, len(list(SystemPart.get(self.database))))
 
 
 class SampleModel(Model):
-
     date = DateField()
     event_id = UInt32Field()
     event_group = UInt32Field()
@@ -292,7 +310,9 @@ class DistributedTestCase(_EnginesHelperTestCase):
             engine.create_table_sql(self.database)
 
         exc = cm.exception
-        self.assertEqual(str(exc), "Cannot create Distributed engine: specify an underlying table")
+        self.assertEqual(
+            str(exc), "Cannot create Distributed engine: specify an underlying table"
+        )
 
     def test_with_table_name(self):
         engine = Distributed("my_cluster", "foo")
@@ -317,7 +337,9 @@ class DistributedTestCase(_EnginesHelperTestCase):
 
         exc = cm.exception
         self.assertEqual(exc.code, 170)
-        self.assertTrue(exc.message.startswith("Requested cluster 'cluster_name' not found"))
+        self.assertTrue(
+            exc.message.startswith("Requested cluster 'cluster_name' not found")
+        )
 
     def test_verbose_engine_two_superclasses(self):
         class TestModel2(SampleModel):
@@ -368,11 +390,16 @@ class DistributedTestCase(_EnginesHelperTestCase):
         exc = cm.exception
         self.assertEqual(
             str(exc),
-            "When defining Distributed engine without the table_name ensure " "that your model has a parent model",
+            "When defining Distributed engine without the table_name ensure "
+            "that your model has a parent model",
         )
 
-    def _test_insert_select(self, local_to_distributed, test_model=TestModel, include_readonly=True):
-        d_model = self._create_distributed("test_shard_localhost", underlying=test_model)
+    def _test_insert_select(
+        self, local_to_distributed, test_model=TestModel, include_readonly=True
+    ):
+        d_model = self._create_distributed(
+            "test_shard_localhost", underlying=test_model
+        )
 
         if local_to_distributed:
             to_insert, to_select = test_model, d_model
@@ -437,4 +464,6 @@ class DistributedTestCase(_EnginesHelperTestCase):
         class TestModel2(self.TestModel):
             event_uversion = UInt8Field(readonly=True)
 
-        return self._test_insert_select(local_to_distributed=False, test_model=TestModel2, include_readonly=False)
+        return self._test_insert_select(
+            local_to_distributed=False, test_model=TestModel2, include_readonly=False
+        )

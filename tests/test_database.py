@@ -4,7 +4,13 @@ import unittest
 
 from clickhouse_orm.database import Database, DatabaseException, ServerError
 from clickhouse_orm.engines import Memory
-from clickhouse_orm.fields import DateField, DateTimeField, Float32Field, Int32Field, StringField
+from clickhouse_orm.fields import (
+    DateField,
+    DateTimeField,
+    Float32Field,
+    Int32Field,
+    StringField,
+)
 from clickhouse_orm.funcs import F
 from clickhouse_orm.models import Model
 from clickhouse_orm.query import Q
@@ -56,9 +62,13 @@ class DatabaseTestCase(TestCaseWithData):
         self.assertEqual(self.database.count(Person, "birthday > '2000-01-01'"), 22)
         self.assertEqual(self.database.count(Person, "birthday < '1970-03-01'"), 0)
         # Conditions as expression
-        self.assertEqual(self.database.count(Person, Person.birthday > datetime.date(2000, 1, 1)), 22)
+        self.assertEqual(
+            self.database.count(Person, Person.birthday > datetime.date(2000, 1, 1)), 22
+        )
         # Conditions as Q object
-        self.assertEqual(self.database.count(Person, Q(birthday__gt=datetime.date(2000, 1, 1))), 22)
+        self.assertEqual(
+            self.database.count(Person, Q(birthday__gt=datetime.date(2000, 1, 1))), 22
+        )
 
     def test_select(self):
         self._insert_and_check(self._sample_data(), len(data))
@@ -118,7 +128,9 @@ class DatabaseTestCase(TestCaseWithData):
             page_num = 1
             instances = set()
             while True:
-                page = self.database.paginate(Person, "first_name, last_name", page_num, page_size)
+                page = self.database.paginate(
+                    Person, "first_name, last_name", page_num, page_size
+                )
                 self.assertEqual(page.number_of_objects, len(data))
                 self.assertGreater(page.pages_total, 0)
                 [instances.add(obj.to_tsv()) for obj in page.objects]
@@ -133,8 +145,12 @@ class DatabaseTestCase(TestCaseWithData):
         # Try different page sizes
         for page_size in (1, 2, 7, 10, 30, 100, 150):
             # Ask for the last page in two different ways and verify equality
-            page_a = self.database.paginate(Person, "first_name, last_name", -1, page_size)
-            page_b = self.database.paginate(Person, "first_name, last_name", page_a.pages_total, page_size)
+            page_a = self.database.paginate(
+                Person, "first_name, last_name", -1, page_size
+            )
+            page_b = self.database.paginate(
+                Person, "first_name, last_name", page_a.pages_total, page_size
+            )
             self.assertEqual(page_a[1:], page_b[1:])
             self.assertEqual(
                 [obj.to_tsv() for obj in page_a.objects],
@@ -164,7 +180,9 @@ class DatabaseTestCase(TestCaseWithData):
     def test_pagination_with_conditions(self):
         self._insert_and_check(self._sample_data(), len(data))
         # Conditions as string
-        page = self.database.paginate(Person, "first_name, last_name", 1, 100, conditions="first_name < 'Ava'")
+        page = self.database.paginate(
+            Person, "first_name, last_name", 1, 100, conditions="first_name < 'Ava'"
+        )
         self.assertEqual(page.number_of_objects, 10)
         # Conditions as expression
         page = self.database.paginate(
@@ -176,11 +194,13 @@ class DatabaseTestCase(TestCaseWithData):
         )
         self.assertEqual(page.number_of_objects, 10)
         # Conditions as Q object
-        page = self.database.paginate(Person, "first_name, last_name", 1, 100, conditions=Q(first_name__lt="Ava"))
+        page = self.database.paginate(
+            Person, "first_name, last_name", 1, 100, conditions=Q(first_name__lt="Ava")
+        )
         self.assertEqual(page.number_of_objects, 10)
 
     def test_special_chars(self):
-        s = u"אבגד \\'\"`,.;éåäöšž\n\t\0\b\r"
+        s = "אבגד \\'\"`,.;éåäöšž\n\t\0\b\r"
         p = Person(first_name=s)
         self.database.insert([p])
         p = list(self.database.select("SELECT * from $table", Person))[0]
@@ -200,12 +220,13 @@ class DatabaseTestCase(TestCaseWithData):
             Database(self.database.db_name, username="default", password="wrong")
 
         exc = cm.exception
+        print(exc.code, exc.message)
         if exc.code == 193:  # ClickHouse version < 20.3
             self.assertTrue(exc.message.startswith("Wrong password for user default"))
         elif exc.code == 516:  # ClickHouse version >= 20.3
             self.assertTrue(exc.message.startswith("default: Authentication failed"))
         else:
-            raise Exception("Unexpected error code - %s" % exc.code)
+            raise Exception("Unexpected error code - %s %s" % (exc.code, exc.message))
 
     def test_nonexisting_db(self):
         db = Database("db_not_here", autocreate=False)
@@ -234,7 +255,9 @@ class DatabaseTestCase(TestCaseWithData):
 
         with self.assertRaises(DatabaseException) as cm:
             self.database.create_table(EnginelessModel)
-        self.assertEqual(str(cm.exception), "EnginelessModel class must define an engine")
+        self.assertEqual(
+            str(cm.exception), "EnginelessModel class must define an engine"
+        )
 
     def test_potentially_problematic_field_names(self):
         class Model1(Model):
@@ -274,6 +297,8 @@ class DatabaseTestCase(TestCaseWithData):
 
         query = "SELECT DISTINCT type FROM system.columns"
         for row in self.database.select(query):
+            if row.type.startswith("Map"):
+                continue  # Not supported yet
             ModelBase.create_ad_hoc_field(row.type)
 
     def test_get_model_for_table(self):
@@ -292,7 +317,12 @@ class DatabaseTestCase(TestCaseWithData):
         query = "SELECT name FROM system.tables WHERE database='system'"
         for row in self.database.select(query):
             print(row.name)
-            model = self.database.get_model_for_table(row.name, system_table=True)
+            if row.name in ("distributed_ddl_queue",):
+                continue  # Not supported
+            try:
+                model = self.database.get_model_for_table(row.name, system_table=True)
+            except NotImplementedError:
+                continue  # Table contains an unsupported field type
             self.assertTrue(model.is_system_model())
             self.assertTrue(model.is_read_only())
             self.assertEqual(model.table_name(), row.name)

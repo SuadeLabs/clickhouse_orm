@@ -1,6 +1,18 @@
 Change Log
 ==========
 
+v2.3.0
+------
+Merges upstream changes:
+
+- Fix pagination for models with alias columns
+- Add `QuerySet.model` to support django-rest-framework 3
+- Improve support of ClickHouse v21.9 (mangototango)
+- Ignore non-numeric parts in ClickHouse version (mangototango)
+- Fix precedence of ~ operator in Q objects	(mangototango)
+- Support for adding a column to the beginning of a table (meanmail)
+- Add stddevPop and stddevSamp functions (k.peskov)
+
 v2.2.2
 ------
 - Unpined requirements to enhance compatability
@@ -216,5 +228,3 @@ v0.7.0
 v0.6.3
 ------
 - Python 3 support
-
-

@@ -55,6 +55,14 @@ class ServerError(DatabaseException):
         """,
             re.VERBOSE | re.DOTALL,
         ),
+        # ClickHouse v21+
+        re.compile(
+            r"""
+            Code:\ (?P<code>\d+).
+            \ (?P<type1>[^ \n]+):\ (?P<msg>.+)
+        """,
+            re.VERBOSE | re.DOTALL,
+        ),
     )
 
     @classmethod
@@ -124,14 +132,20 @@ class Database(object):
         self.db_exists = self._is_existing_database()
         if readonly:
             if not self.db_exists:
-                raise DatabaseException("Database does not exist, and cannot be created under readonly connection")
+                raise DatabaseException(
+                    "Database does not exist, and cannot be created under readonly connection"
+                )
             self.connection_readonly = self._is_connection_readonly()
             self.readonly = True
         elif autocreate and not self.db_exists:
             self.create_database()
         self.server_version = self._get_server_version()
         # Versions 1.1.53981 and below don't have timezone function
-        self.server_timezone = self._get_server_timezone() if self.server_version > (1, 1, 53981) else pytz.utc
+        self.server_timezone = (
+            self._get_server_timezone()
+            if self.server_version > (1, 1, 53981)
+            else pytz.utc
+        )
         # Versions 19.1.16 and above support codec compression
         self.has_codec_support = self.server_version >= (19, 1, 16)
         # Version 19.0 and above support LowCardinality
@@ -158,7 +172,9 @@ class Database(object):
         if model_class.is_system_model():
             raise DatabaseException("You can't create system table")
         if model_class.engine is None:
-            raise DatabaseException("%s class must define an engine" % model_class.__name__)
+            raise DatabaseException(
+                "%s class must define an engine" % model_class.__name__
+            )
         self._send(model_class.create_table_sql(self))
 
     def drop_table(self, model_class):
@@ -229,7 +245,9 @@ class Database(object):
         if first_instance.is_read_only() or first_instance.is_system_model():
             raise DatabaseException("You can't insert into read only and system tables")
 
-        fields_list = ",".join(["`%s`" % name for name in first_instance.fields(writable=True)])
+        fields_list = ",".join(
+            ["`%s`" % name for name in first_instance.fields(writable=True)]
+        )
         fmt = "TSKV" if model_class.has_funcs_as_defaults() else "TabSeparated"
         query = "INSERT INTO $table (%s) FORMAT %s\n" % (fields_list, fmt)
 
@@ -289,11 +307,15 @@ class Database(object):
         lines = r.iter_lines()
         field_names = parse_tsv(next(lines))
         field_types = parse_tsv(next(lines))
-        model_class = model_class or ModelBase.create_ad_hoc_model(zip(field_names, field_types))
+        model_class = model_class or ModelBase.create_ad_hoc_model(
+            zip(field_names, field_types)
+        )
         for line in lines:
             # skip blank line left by WITH TOTALS modifier
             if line:
-                yield model_class.from_tsv(line, field_names, self.server_timezone, self)
+                yield model_class.from_tsv(
+                    line, field_names, self.server_timezone, self
+                )
 
     def raw(self, query, settings=None, stream=False):
         """
@@ -306,7 +328,15 @@ class Database(object):
         query = self._substitute(query, None)
         return self._send(query, settings=settings, stream=stream).text
 
-    def paginate(self, model_class, order_by, page_num=1, page_size=100, conditions=None, settings=None):
+    def paginate(
+        self,
+        model_class,
+        order_by,
+        page_num=1,
+        page_size=100,
+        conditions=None,
+        settings=None,
+    ):
         """
         Selects records and returns a single page of model instances.
 
@@ -330,7 +360,8 @@ class Database(object):
         elif page_num < 1:
             raise ValueError("Invalid page number: %d" % page_num)
         offset = (page_num - 1) * page_size
-        query = "SELECT * FROM $table"
+        query = "SELECT {} FROM $table".format(", ".join(model_class.fields().keys()))
+
         if conditions:
             if isinstance(conditions, Q):
                 conditions = conditions.to_sql(model_class)
@@ -367,7 +398,9 @@ class Database(object):
             self.insert(
                 [
                     MigrationHistory(
-                        package_name=migrations_package_name, module_name=name, applied=datetime.date.today()
+                        package_name=migrations_package_name,
+                        module_name=name,
+                        applied=datetime.date.today(),
                     )
                 ]
             )
@@ -378,7 +411,10 @@ class Database(object):
         from .migrations import MigrationHistory
 
         self.create_table(MigrationHistory)
-        query = "SELECT module_name from $table WHERE package_name = '%s'" % migrations_package_name
+        query = (
+            "SELECT module_name from $table WHERE package_name = '%s'"
+            % migrations_package_name
+        )
         query = self._substitute(query, MigrationHistory)
         return set(obj.module_name for obj in self.select(query))
 
@@ -388,7 +424,9 @@ class Database(object):
             if self.log_statements:
                 logger.info(data)
         params = self._build_params(settings)
-        r = self.request_session.post(self.db_url, params=params, data=data, stream=stream, timeout=self.timeout)
+        r = self.request_session.post(
+            self.db_url, params=params, data=data, stream=stream, timeout=self.timeout
+        )
         if r.status_code != 200:
             raise ServerError(r.text)
         return r
@@ -413,7 +451,10 @@ class Database(object):
                 if model_class.is_system_model():
                     mapping["table"] = "`system`.`%s`" % model_class.table_name()
                 else:
-                    mapping["table"] = "`%s`.`%s`" % (self.db_name, model_class.table_name())
+                    mapping["table"] = "`%s`.`%s`" % (
+                        self.db_name,
+                        model_class.table_name(),
+                    )
             query = Template(query).safe_substitute(mapping)
         return query
 
@@ -432,10 +473,12 @@ class Database(object):
         except ServerError as e:
             logger.exception("Cannot determine server version (%s), assuming 1.1.0", e)
             ver = "1.1.0"
-        return tuple(int(n) for n in ver.split(".")) if as_tuple else ver
+        return tuple(int(n) for n in ver.split(".") if n.isdigit()) if as_tuple else ver
 
     def _is_existing_database(self):
-        r = self._send("SELECT count() FROM system.databases WHERE name = '%s'" % self.db_name)
+        r = self._send(
+            "SELECT count() FROM system.databases WHERE name = '%s'" % self.db_name
+        )
         return r.text.strip() == "1"
 
     def _is_connection_readonly(self):

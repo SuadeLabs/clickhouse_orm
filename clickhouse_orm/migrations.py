@@ -84,10 +84,12 @@ class AlterTable(ModelOperation):
             is_regular_field = not (field.materialized or field.alias)
             if name not in table_fields:
                 logger.info("        Add column %s", name)
-                assert prev_name, "Cannot add a column to the beginning of the table"
                 cmd = "ADD COLUMN %s %s" % (name, field.get_sql(db=database))
                 if is_regular_field:
-                    cmd += " AFTER %s" % prev_name
+                    if prev_name:
+                        cmd += " AFTER %s" % prev_name
+                    else:
+                        cmd += " FIRST"
                 self._alter_table(database, cmd)
 
             if is_regular_field:
@@ -105,13 +107,21 @@ class AlterTable(ModelOperation):
         }
         for field_name, field_sql in self._get_table_fields(database):
             # All fields must have been created and dropped by this moment
-            assert field_name in model_fields, "Model fields and table columns in disagreement"
+            assert field_name in model_fields, (
+                "Model fields and table columns in disagreement"
+            )
 
             if field_sql != model_fields[field_name]:
                 logger.info(
-                    "        Change type of column %s from %s to %s", field_name, field_sql, model_fields[field_name]
+                    "        Change type of column %s from %s to %s",
+                    field_name,
+                    field_sql,
+                    model_fields[field_name],
                 )
-                self._alter_table(database, "MODIFY COLUMN %s %s" % (field_name, model_fields[field_name]))
+                self._alter_table(
+                    database,
+                    "MODIFY COLUMN %s %s" % (field_name, model_fields[field_name]),
+                )
 
 
 class AlterTableWithBuffer(ModelOperation):
