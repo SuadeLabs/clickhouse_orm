@@ -92,10 +92,12 @@ class Database:
     inserting data and other operations.
     """
 
+    _default_url = "http://localhost:8123/"
+
     def __init__(
         self,
         db_name,
-        db_url="http://localhost:8123/",
+        db_url=None,
         username=None,
         password=None,
         readonly=False,
@@ -119,7 +121,7 @@ class Database:
         - `log_statements`: when True, all database statements are logged.
         """
         self.db_name = db_name
-        self.db_url = db_url
+        self.db_url = db_url or self._default_url
         self.readonly = False
         self.timeout = timeout
         self.request_session = requests.Session()
