@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import unittest
 from datetime import date, datetime
 from enum import Enum
@@ -84,10 +86,8 @@ class QuerySetTestCase(TestCaseWithData):
         )
         self._test_qs(
             qs.filter(
-
-                    Q(first_name__in=["Warren", "Whilemina", "Whitney"]) & Q(height__gte=1.7)
-                    | (Q(first_name__in=["Victoria", "Victor", "Venus"]) & Q(height__lt=1.7))
-
+                Q(first_name__in=["Warren", "Whilemina", "Whitney"]) & Q(height__gte=1.7)
+                | (Q(first_name__in=["Victoria", "Victor", "Venus"]) & Q(height__lt=1.7))
             ),
             4,
         )

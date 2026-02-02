@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 
 class Page(NamedTuple):
     """A simple data structure for paginated results."""
+
     objects: list[Any]
     number_of_objects: int
     pages_total: int
