@@ -217,7 +217,9 @@ class Q(object):
         if mode == l_child._mode and not l_child._negate:
             q = deepcopy(l_child)
             q._children.append(deepcopy(r_child))
-
+        elif mode == r_child._mode and not r_child._negate:
+            q = deepcopy(r_child)
+            q._children.append(deepcopy(l_child))
         else:
             q = cls()
             q._children = [l_child, r_child]
@@ -300,6 +302,7 @@ class QuerySet(object):
         Initializer. It is possible to create a queryset like this, but the standard
         way is to use `MyModel.objects_in(database)`.
         """
+        self.model = model_cls
         self._model_cls = model_cls
         self._database = database
         self._order_by = []

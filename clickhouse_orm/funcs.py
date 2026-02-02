@@ -405,11 +405,11 @@ class F(Cond, FunctionOperatorsMixin, metaclass=FMeta):
 
     @staticmethod
     def toISOYear(d, timezone=NO_VALUE):
-        return F("toISOYear", d, timezone)
+        return F('toISOYear', d, timezone)
 
     @staticmethod
     def toQuarter(d, timezone=NO_VALUE):
-        return F("toQuarter", d, timezone)
+        return F('toQuarter', d, timezone) if timezone else F('toQuarter', d)
 
     @staticmethod
     def toMonth(d, timezone=NO_VALUE):
@@ -417,11 +417,11 @@ class F(Cond, FunctionOperatorsMixin, metaclass=FMeta):
 
     @staticmethod
     def toWeek(d, mode=0, timezone=NO_VALUE):
-        return F("toWeek", d, mode, timezone)
+        return F('toWeek', d, mode, timezone)
 
     @staticmethod
     def toISOWeek(d, timezone=NO_VALUE):
-        return F("toISOWeek", d, timezone)
+        return F('toISOWeek', d, timezone) if timezone else F('toISOWeek', d)
 
     @staticmethod
     def toDayOfYear(d, timezone=NO_VALUE):
@@ -497,7 +497,7 @@ class F(Cond, FunctionOperatorsMixin, metaclass=FMeta):
 
     @staticmethod
     def toTime(d, timezone=NO_VALUE):
-        return F("toTime", d, timezone)
+        return F('toTime', d, timezone)
 
     @staticmethod
     def toTimeZone(dt, timezone):
@@ -505,47 +505,47 @@ class F(Cond, FunctionOperatorsMixin, metaclass=FMeta):
 
     @staticmethod
     def toUnixTimestamp(dt, timezone=NO_VALUE):
-        return F("toUnixTimestamp", dt, timezone)
+        return F('toUnixTimestamp', dt, timezone)
 
     @staticmethod
     def toYYYYMM(dt, timezone=NO_VALUE):
-        return F("toYYYYMM", dt, timezone)
+        return F('toYYYYMM', dt, timezone) if timezone else F('toYYYYMM', dt)
 
     @staticmethod
     def toYYYYMMDD(dt, timezone=NO_VALUE):
-        return F("toYYYYMMDD", dt, timezone)
+        return F('toYYYYMMDD', dt, timezone) if timezone else F('toYYYYMMDD', dt)
 
     @staticmethod
     def toYYYYMMDDhhmmss(dt, timezone=NO_VALUE):
-        return F("toYYYYMMDDhhmmss", dt, timezone)
+        return F('toYYYYMMDDhhmmss', dt, timezone) if timezone else F('toYYYYMMDDhhmmss', dt)
 
     @staticmethod
     def toRelativeYearNum(d, timezone=NO_VALUE):
-        return F("toRelativeYearNum", d, timezone)
+        return F('toRelativeYearNum', d, timezone)
 
     @staticmethod
     def toRelativeMonthNum(d, timezone=NO_VALUE):
-        return F("toRelativeMonthNum", d, timezone)
+        return F('toRelativeMonthNum', d, timezone)
 
     @staticmethod
     def toRelativeWeekNum(d, timezone=NO_VALUE):
-        return F("toRelativeWeekNum", d, timezone)
+        return F('toRelativeWeekNum', d, timezone)
 
     @staticmethod
     def toRelativeDayNum(d, timezone=NO_VALUE):
-        return F("toRelativeDayNum", d, timezone)
+        return F('toRelativeDayNum', d, timezone)
 
     @staticmethod
     def toRelativeHourNum(d, timezone=NO_VALUE):
-        return F("toRelativeHourNum", d, timezone)
+        return F('toRelativeHourNum', d, timezone)
 
     @staticmethod
     def toRelativeMinuteNum(d, timezone=NO_VALUE):
-        return F("toRelativeMinuteNum", d, timezone)
+        return F('toRelativeMinuteNum', d, timezone)
 
     @staticmethod
     def toRelativeSecondNum(d, timezone=NO_VALUE):
-        return F("toRelativeSecondNum", d, timezone)
+        return F('toRelativeSecondNum', d, timezone)
 
     @staticmethod
     def now():
@@ -569,7 +569,7 @@ class F(Cond, FunctionOperatorsMixin, metaclass=FMeta):
 
     @staticmethod
     def formatDateTime(d, format, timezone=NO_VALUE):
-        return F("formatDateTime", d, format, timezone)
+        return F('formatDateTime', d, format, timezone)
 
     @staticmethod
     def addDays(d, n, timezone=NO_VALUE):
@@ -910,8 +910,6 @@ class F(Cond, FunctionOperatorsMixin, metaclass=FMeta):
     @staticmethod
     def replace(haystack, pattern, replacement):
         return F("replace", haystack, pattern, replacement)
-
-    replaceAll = replace
 
     @staticmethod
     def replaceAll(haystack, pattern, replacement):
@@ -1648,6 +1646,16 @@ class F(Cond, FunctionOperatorsMixin, metaclass=FMeta):
     @aggregate
     def varSamp(x):
         return F("varSamp", x)
+
+    @staticmethod
+    @aggregate
+    def stddevPop(expr):
+        return F('stddevPop', expr)
+
+    @staticmethod
+    @aggregate
+    def stddevSamp(expr):
+        return F('stddevSamp', expr)
 
     @staticmethod
     @aggregate

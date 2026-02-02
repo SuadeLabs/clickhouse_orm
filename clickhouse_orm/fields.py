@@ -116,9 +116,9 @@ class Field(FunctionOperatorsMixin):
             sql += " DEFAULT %s" % self.default.to_sql()
         elif self.default:
             default = self.to_db_string(self.default)
-            sql += " DEFAULT %s" % default
-        if self.codec and db and db.has_codec_support:
-            sql += " CODEC(%s)" % self.codec
+            sql += ' DEFAULT %s' % default
+        if self.codec and db and db.has_codec_support and not self.alias:
+            sql += ' CODEC(%s)' % self.codec
         return sql
 
     def isinstance(self, types):
