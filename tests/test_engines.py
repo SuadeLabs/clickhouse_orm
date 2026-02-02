@@ -309,7 +309,7 @@ class DistributedTestCase(_EnginesHelperTestCase):
             self.database.count(d_model)
 
         exc = cm.exception
-        self.assertEqual(exc.code, 170)
+        self.assertIn(exc.code, (170, 701))  # Different ClickHouse versions have different error codes
         self.assertTrue(exc.message.startswith("Requested cluster 'cluster_name' not found"))
 
     def test_verbose_engine_two_superclasses(self):

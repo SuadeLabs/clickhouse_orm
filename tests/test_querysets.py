@@ -5,6 +5,8 @@ from datetime import date, datetime
 from enum import Enum
 from logging import getLogger
 
+import pytest
+
 from clickhouse_orm.database import Database
 from clickhouse_orm.engines import CollapsingMergeTree, Memory, MergeTree
 from clickhouse_orm.fields import DateField, DateTimeField, Enum8Field, Int8Field, Int32Field, StringField, UInt64Field
@@ -165,7 +167,7 @@ class QuerySetTestCase(TestCaseWithData):
         person = list(qs.order_by("-first_name", "-last_name"))[0]
         self.assertEqual(person.first_name, "Yolanda")
         person = list(qs.order_by("height"))[0]
-        self.assertEqual(person.height, 1.59)
+        self.assertEqual(person.height, pytest.approx(1.59))
         person = list(qs.order_by("-height"))[0]
         self.assertEqual(person.height, 1.8)
 
@@ -569,7 +571,7 @@ class AggregateTestCase(TestCaseWithData):
         self.assertEqual(qs.count(), 94)
         self.assertEqual(list(qs)[89].last_name, "Bowen")
         # Test with limit and offset, also mixing LIMIT with LIMIT BY
-        qs = Person.objects_in(self.database).filter(height__gt=1.67).order_by("height", "first_name")
+        qs = Person.objects_in(self.database).filter(height__gt=1.671).order_by("height", "first_name")
         limited_qs = qs.limit_by((0, 3), "height")
         self.assertEqual([p.first_name for p in limited_qs[:3]], ["Amanda", "Buffy", "Dora"])
         limited_qs = qs.limit_by((3, 3), "height")

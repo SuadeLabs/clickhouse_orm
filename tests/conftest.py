@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import contextlib
+import pathlib
 import time
 
 import docker
+import docker.errors
 import pytest
 
 from clickhouse_orm.database import Database
+
+_HERE = pathlib.Path(__file__).parent.resolve()
 
 
 # The following allows running tests locally with a temporary Clickhouse docker container
@@ -31,9 +36,9 @@ def setup_local_db(request: pytest.FixtureRequest) -> Database:
 
     def rm_local_db():
         Database._default_url = orig_url
-        try:
+        with contextlib.suppress(docker.errors.NotFound):
             docker_client.kill(container_name)
-        finally:
+        with contextlib.suppress(docker.errors.NotFound):
             docker_client.remove_container(container_name)
 
     request.addfinalizer(rm_local_db)
@@ -54,7 +59,12 @@ def start_db_container(client: docker.APIClient, container_name: str) -> Databas
         stdin_open=False,
         tty=False,
         host_config=client.create_host_config(
-            binds=[],
+            binds={
+                str(_HERE / "remote-servers.xml"): {
+                    "bind": "/etc/clickhouse-server/config.d/remote_servers.xml",
+                    "mode": "ro",
+                }
+            },
             tmpfs={"/var/lib/clickhouse": "size=4G,uid=999"},
             volumes_from=[],
             publish_all_ports=True,

@@ -6,6 +6,7 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 from ipaddress import IPv4Address, IPv6Address
 
+import pytest
 import pytz
 
 from clickhouse_orm.database import ServerError
@@ -751,7 +752,7 @@ class FuncsTestCase(TestCaseWithData):
         self._test_aggr(F.round(F.covarSamp(Person.height, Person.height), 2), 0)
         self._test_aggr(F.kurtPop(Person.height))
         self._test_aggr(F.kurtSamp(Person.height))
-        self._test_aggr(F.min(Person.height), 1.59)
+        self._test_aggr(F.min(Person.height), pytest.approx(1.59))
         self._test_aggr(F.max(Person.height), 1.80)
         self._test_aggr(F.skewPop(Person.height))
         self._test_aggr(F.skewSamp(Person.height))

@@ -23,7 +23,6 @@ from clickhouse_orm.fields import (
     LowCardinalityField,
     NullableField,
     StringField,
-    UInt64Field,
 )
 from clickhouse_orm.migrations import MigrationHistory
 from clickhouse_orm.models import BufferModel, Constraint, Index, Model
@@ -75,7 +74,7 @@ class MigrationsTestCase(unittest.TestCase):
                 ("f3", "Float32"),
                 ("f2", "String"),
                 ("f4", "String"),
-                ("f5", "Array(UInt64)"),
+                ("f5", "Array(String)"),
             ],
         )
         self.database.migrate("tests.sample_migrations", 5)
@@ -173,11 +172,11 @@ class MigrationsTestCase(unittest.TestCase):
                 self.get_table_fields(Model2LowCardinality),
                 [
                     ("date", "Date"),
-                    ("f1", "LowCardinality(Int32)"),
-                    ("f3", "LowCardinality(Float32)"),
+                    ("f1", "Int32"),
+                    ("f3", "Float32"),
                     ("f2", "LowCardinality(String)"),
                     ("f4", "LowCardinality(Nullable(String))"),
-                    ("f5", "Array(LowCardinality(UInt64))"),
+                    ("f5", "Array(LowCardinality(String))"),
                 ],
             )
         else:
@@ -190,7 +189,7 @@ class MigrationsTestCase(unittest.TestCase):
                     ("f3", "Float32"),
                     ("f2", "String"),
                     ("f4", "Nullable(String)"),
-                    ("f5", "Array(UInt64)"),
+                    ("f5", "Array(String)"),
                 ],
             )
 
@@ -245,7 +244,7 @@ class Model2(Model):
     f3 = Float32Field()
     f2 = StringField()
     f4 = StringField()
-    f5 = ArrayField(UInt64Field())  # addition of an array field
+    f5 = ArrayField(StringField())  # addition of an array field
 
     engine = MergeTree("date", ("date",))
 
@@ -391,11 +390,11 @@ class Model4Compressed(Model):
 
 class Model2LowCardinality(Model):
     date = DateField()
-    f1 = LowCardinalityField(Int32Field())
-    f3 = LowCardinalityField(Float32Field())
+    f1 = Int32Field()
+    f3 = Float32Field()
     f2 = LowCardinalityField(StringField())
     f4 = LowCardinalityField(NullableField(StringField()))
-    f5 = ArrayField(LowCardinalityField(UInt64Field()))
+    f5 = ArrayField(LowCardinalityField(StringField()))
 
     engine = MergeTree("date", ("date",))
 

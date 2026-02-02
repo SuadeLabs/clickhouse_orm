@@ -155,18 +155,18 @@ class AlterConstraints(ModelOperation):
     def apply(self, database):
         logger.info("    Alter constraints for %s", self.table_name)
         existing = self._get_constraint_names(database)
-        # Go over constraints in the model
+        no_longer_needed = existing - {c.name for c in self.model_class._constraints.values()}
+        # Drop old constraints first as they can conflict
+        for name in no_longer_needed:
+            logger.info("        Drop constraint %s", name)
+            self._alter_table(database, "DROP CONSTRAINT `%s`" % name)
+
+        # Add any new constraints
         for constraint in self.model_class._constraints.values():
             # Check if it's a new constraint
             if constraint.name not in existing:
                 logger.info("        Add constraint %s", constraint.name)
                 self._alter_table(database, "ADD %s" % constraint.create_table_sql())
-            else:
-                existing.remove(constraint.name)
-        # Remaining constraints in `existing` are obsolete
-        for name in existing:
-            logger.info("        Drop constraint %s", name)
-            self._alter_table(database, "DROP CONSTRAINT `%s`" % name)
 
     def _get_constraint_names(self, database):
         """

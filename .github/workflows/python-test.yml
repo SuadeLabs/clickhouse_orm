@@ -36,13 +36,6 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
-    services:
-      clickhouse:
-        image: clickhouse/clickhouse-server:25.8
-        ports:
-          - 8123:8123
-        env:
-          CLICKHOUSE_SKIP_USER_SETUP: "1"
     strategy:
       fail-fast: false
       matrix:
@@ -50,6 +43,13 @@ jobs:
 
     steps:
     - uses: actions/checkout@v6
+    # We need to start ClickHouse manually to be able to mount our custom
+    # config file after git checkout
+    - name: Start ClickHouse with cluster config
+      run: |
+        docker run -d --rm --name ch -p 8123:8123 -e CLICKHOUSE_SKIP_USER_SETUP=1 \
+          -v "$GITHUB_WORKSPACE/tests/remote-servers.xml:/etc/clickhouse-server/config.d/remote_servers.xml:ro" \
+          clickhouse/clickhouse-server:25.8
     - name: Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@v6
       with:
