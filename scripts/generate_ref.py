@@ -1,7 +1,12 @@
-import inspect
-from collections import namedtuple
+from __future__ import annotations
 
-DefaultArgSpec = namedtuple("DefaultArgSpec", "has_default default_value")
+import inspect
+from typing import Any, NamedTuple
+
+
+class DefaultArgSpec(NamedTuple):
+    has_default: bool
+    default_value: Any
 
 
 def _get_default_arg(args, defaults, arg_index):
@@ -126,7 +131,6 @@ def all_subclasses(cls):
 
 
 if __name__ == "__main__":
-
     from clickhouse_orm import database, engines, fields, funcs, models, query, system_models
 
     print("Class Reference")

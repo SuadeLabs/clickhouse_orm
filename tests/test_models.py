@@ -99,7 +99,7 @@ class ModelTestCase(unittest.TestCase):
             SimpleModel(str_field=bad_value)
 
         self.assertEqual(
-            "Invalid value for StringField: {} (field 'str_field')".format(repr(bad_value)),
+            f"Invalid value for StringField: {repr(bad_value)} (field 'str_field')",
             str(cm.exception),
         )
 
@@ -110,13 +110,12 @@ class ModelTestCase(unittest.TestCase):
             instance.float_field = bad_value
 
         self.assertEqual(
-            "Invalid value for Float32Field - {} (field 'float_field')".format(repr(bad_value)),
+            f"Invalid value for Float32Field - {repr(bad_value)} (field 'float_field')",
             str(cm.exception),
         )
 
 
 class SimpleModel(Model):
-
     date_field = DateField()
     datetime_field = DateTimeField()
     str_field = StringField(default="dozo")

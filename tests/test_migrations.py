@@ -165,7 +165,7 @@ class MigrationsTestCase(unittest.TestCase):
         )
         # Codecs and low cardinality
         self.database.migrate("tests.sample_migrations", 15)
-        self.assertTrue(self.table_exists(Model4_compressed))
+        self.assertTrue(self.table_exists(Model4Compressed))
         if self.database.has_low_cardinality_support:
             self.assertEqual(
                 self.get_table_fields(Model2LowCardinality),
@@ -226,7 +226,6 @@ class MigrationsTestCase(unittest.TestCase):
 
 
 class Model1(Model):
-
     date = DateField()
     f1 = Int32Field()
     f2 = StringField()
@@ -239,7 +238,6 @@ class Model1(Model):
 
 
 class Model2(Model):
-
     date = DateField()
     f1 = Int32Field()
     f3 = Float32Field()
@@ -255,7 +253,6 @@ class Model2(Model):
 
 
 class Model3(Model):
-
     date = DateField()
     f1 = Int64Field()  # changed from Int32
     f3 = Float64Field()  # changed from Float32
@@ -269,7 +266,6 @@ class Model3(Model):
 
 
 class EnumModel1(Model):
-
     date = DateField()
     f1 = Enum8Field(Enum("SomeEnum1", "dog cat cow"))
 
@@ -281,7 +277,6 @@ class EnumModel1(Model):
 
 
 class EnumModel2(Model):
-
     date = DateField()
     f1 = Enum16Field(Enum("SomeEnum2", "dog cat horse pig"))  # changed type and values
 
@@ -341,7 +336,6 @@ class AliasModel1(Model):
 
 
 class Model4(Model):
-
     date = DateField()
     f1 = Int32Field()
     f2 = StringField()
@@ -354,7 +348,6 @@ class Model4(Model):
 
 
 class Model4Buffer(BufferModel, Model4):
-
     engine = Buffer(Model4)
 
     @classmethod
@@ -362,8 +355,7 @@ class Model4Buffer(BufferModel, Model4):
         return "model4buffer"
 
 
-class Model4_changed(Model):
-
+class Model4Changed(Model):
     date = DateField()
     f3 = DateTimeField()
     f2 = StringField()
@@ -375,17 +367,15 @@ class Model4_changed(Model):
         return "model4"
 
 
-class Model4Buffer_changed(BufferModel, Model4_changed):
-
-    engine = Buffer(Model4_changed)
+class Model4BufferChanged(BufferModel, Model4Changed):
+    engine = Buffer(Model4Changed)
 
     @classmethod
     def table_name(cls):
         return "model4buffer"
 
 
-class Model4_compressed(Model):
-
+class Model4Compressed(Model):
     date = DateField()
     f3 = DateTimeField(codec="Delta,ZSTD(10)")
     f2 = StringField(codec="LZ4HC")
@@ -413,7 +403,6 @@ class Model2LowCardinality(Model):
 
 
 class ModelWithConstraints(Model):
-
     date = DateField()
     f1 = Int32Field()
     f2 = StringField()
@@ -429,7 +418,6 @@ class ModelWithConstraints(Model):
 
 
 class ModelWithConstraints2(Model):
-
     date = DateField()
     f1 = Int32Field()
     f2 = StringField()
@@ -445,7 +433,6 @@ class ModelWithConstraints2(Model):
 
 
 class ModelWithIndex(Model):
-
     date = DateField()
     f1 = Int32Field()
     f2 = StringField()
@@ -461,7 +448,6 @@ class ModelWithIndex(Model):
 
 
 class ModelWithIndex2(Model):
-
     date = DateField()
     f1 = Int32Field()
     f2 = StringField()

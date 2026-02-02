@@ -33,7 +33,6 @@ class InheritanceTestCase(unittest.TestCase):
 
 
 class ParentModel(Model):
-
     date_field = DateField()
     int_field = Int32Field()
 
@@ -41,10 +40,8 @@ class ParentModel(Model):
 
 
 class Model1(ParentModel):
-
     string_field = StringField()
 
 
 class Model2(ParentModel):
-
     float_field = Float32Field()

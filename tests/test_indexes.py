@@ -18,7 +18,6 @@ class IndexesTest(unittest.TestCase):
 
 
 class ModelWithIndexes(Model):
-
     date = DateField()
     f1 = Int32Field()
     f2 = StringField()

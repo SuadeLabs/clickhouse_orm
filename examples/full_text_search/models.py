@@ -4,7 +4,6 @@ from clickhouse_orm.models import Index, Model
 
 
 class Fragment(Model):
-
     language = LowCardinalityField(StringField(), default="EN")
     document = LowCardinalityField(StringField())
     idx = UInt64Field()

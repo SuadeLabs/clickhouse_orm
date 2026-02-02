@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 import unittest
 
 from clickhouse_orm.database import Database, DatabaseException, ServerError

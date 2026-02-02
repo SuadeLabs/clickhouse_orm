@@ -5,7 +5,7 @@ from pygal.style import RotateStyle
 
 # Formatting functions
 def number_formatter(v):
-    return "{:,}".format(v)
+    return f"{v:,}"
 
 
 def bytes_formatter(v):

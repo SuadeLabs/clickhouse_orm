@@ -6,7 +6,7 @@ import requests
 def download_ebook(id):
     print(id, end=" ")
     # Download the ebook's text
-    r = requests.get("https://www.gutenberg.org/files/{id}/{id}-0.txt".format(id=id))
+    r = requests.get(f"https://www.gutenberg.org/files/{id}/{id}-0.txt")
     if r.status_code == 404:
         print("NOT FOUND, SKIPPING")
         return
@@ -18,7 +18,7 @@ def download_ebook(id):
             title = line[6:].strip()
     print(title)
     # Save the ebook
-    with open("ebooks/{}.txt".format(title), "wb") as f:
+    with open(f"ebooks/{title}.txt", "wb") as f:
         f.write(r.content)
 
 

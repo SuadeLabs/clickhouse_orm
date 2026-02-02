@@ -132,9 +132,7 @@ class CompressedFieldsTestCase(unittest.TestCase):
         )
         self.database.insert([instance])
         r = self.database.raw(
-            "select name, compression_codec from system.columns where table = '{}' and database='{}' FORMAT TabSeparatedWithNamesAndTypes".format(
-                instance.table_name(), self.database.db_name
-            )
+            f"select name, compression_codec from system.columns where table = '{instance.table_name()}' and database='{self.database.db_name}' FORMAT TabSeparatedWithNamesAndTypes"
         )
         lines = r.splitlines()
         parse_tsv(lines[0])

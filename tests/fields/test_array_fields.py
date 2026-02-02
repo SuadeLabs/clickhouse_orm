@@ -60,7 +60,6 @@ class ArrayFieldsTest(unittest.TestCase):
 
 
 class ModelWithArrays(Model):
-
     date_field = DateField()
     arr_str = ArrayField(StringField())
     arr_int = ArrayField(Int32Field())

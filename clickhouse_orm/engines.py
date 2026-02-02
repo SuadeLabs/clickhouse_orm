@@ -5,7 +5,7 @@ from .utils import comma_join, get_subclass_names
 logger = logging.getLogger("clickhouse_orm")
 
 
-class Engine(object):
+class Engine:
     def create_table_sql(self, db):
         raise NotImplementedError()  # pragma: no cover
 
@@ -44,9 +44,9 @@ class MergeTree(Engine):
             list,
             tuple,
         ), "partition_key must be tuple or list if present"
-        assert (replica_table_path is None) == (
-            replica_name is None
-        ), "both replica_table_path and replica_name must be specified"
+        assert (replica_table_path is None) == (replica_name is None), (
+            "both replica_table_path and replica_name must be specified"
+        )
 
         # These values conflict with each other (old and new syntax of table engines.
         # So let's control only one of them is given.
@@ -145,7 +145,7 @@ class CollapsingMergeTree(MergeTree):
         partition_key=None,
         primary_key=None,
     ):
-        super(CollapsingMergeTree, self).__init__(
+        super().__init__(
             date_col,
             order_by,
             sampling_expr,
@@ -158,7 +158,7 @@ class CollapsingMergeTree(MergeTree):
         self.sign_col = sign_col
 
     def _build_sql_params(self, db):
-        params = super(CollapsingMergeTree, self)._build_sql_params(db)
+        params = super()._build_sql_params(db)
         params.append(self.sign_col)
         return params
 
@@ -176,7 +176,7 @@ class SummingMergeTree(MergeTree):
         partition_key=None,
         primary_key=None,
     ):
-        super(SummingMergeTree, self).__init__(
+        super().__init__(
             date_col,
             order_by,
             sampling_expr,
@@ -190,7 +190,7 @@ class SummingMergeTree(MergeTree):
         self.summing_cols = summing_cols
 
     def _build_sql_params(self, db):
-        params = super(SummingMergeTree, self)._build_sql_params(db)
+        params = super()._build_sql_params(db)
         if self.summing_cols:
             params.append("(%s)" % comma_join(self.summing_cols))
         return params
@@ -209,7 +209,7 @@ class ReplacingMergeTree(MergeTree):
         partition_key=None,
         primary_key=None,
     ):
-        super(ReplacingMergeTree, self).__init__(
+        super().__init__(
             date_col,
             order_by,
             sampling_expr,
@@ -222,7 +222,7 @@ class ReplacingMergeTree(MergeTree):
         self.ver_col = ver_col
 
     def _build_sql_params(self, db):
-        params = super(ReplacingMergeTree, self)._build_sql_params(db)
+        params = super()._build_sql_params(db)
         if self.ver_col:
             params.append(self.ver_col)
         return params
@@ -332,7 +332,7 @@ class Distributed(Engine):
 
     def _build_sql_params(self, db):
         if self.table_name is None:
-            raise ValueError("Cannot create {} engine: specify an underlying table".format(self.__class__.__name__))
+            raise ValueError(f"Cannot create {self.__class__.__name__} engine: specify an underlying table")
 
         params = ["`%s`" % p for p in [self.cluster, db.db_name, self.table_name]]
         if self.sharding_key:

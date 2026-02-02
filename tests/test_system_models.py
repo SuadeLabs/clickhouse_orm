@@ -31,7 +31,6 @@ class SystemTest(unittest.TestCase):
 
 
 class SystemPartTest(unittest.TestCase):
-
     BACKUP_DIRS = ["/var/lib/clickhouse/shadow", "/opt/clickhouse/shadow/"]
 
     def setUp(self):
@@ -71,9 +70,9 @@ class SystemPartTest(unittest.TestCase):
     def test_get_conditions(self):
         parts = list(SystemPart.get(self.database, conditions="table='sometesttable'"))
         self.assertEqual(len(parts), 1)
-        parts = list(SystemPart.get(self.database, conditions=u"table='custompartitionedtable'"))
+        parts = list(SystemPart.get(self.database, conditions="table='custompartitionedtable'"))
         self.assertEqual(len(parts), 1)
-        parts = list(SystemPart.get(self.database, conditions=u"table='invalidtable'"))
+        parts = list(SystemPart.get(self.database, conditions="table='invalidtable'"))
         self.assertEqual(len(parts), 0)
 
     def test_attach_detach(self):

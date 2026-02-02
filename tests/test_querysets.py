@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 import unittest
 from datetime import date, datetime
 from enum import Enum
@@ -18,7 +17,7 @@ logger = getLogger("tests")
 
 class QuerySetTestCase(TestCaseWithData):
     def setUp(self):
-        super(QuerySetTestCase, self).setUp()
+        super().setUp()
         self.database.insert(self._sample_data())
 
     def _test_qs(self, qs, expected_count):
@@ -85,10 +84,10 @@ class QuerySetTestCase(TestCaseWithData):
         )
         self._test_qs(
             qs.filter(
-                (
+
                     Q(first_name__in=["Warren", "Whilemina", "Whitney"]) & Q(height__gte=1.7)
                     | (Q(first_name__in=["Victoria", "Victor", "Venus"]) & Q(height__lt=1.7))
-                )
+
             ),
             4,
         )
@@ -112,9 +111,9 @@ class QuerySetTestCase(TestCaseWithData):
         )
 
     def test_filter_unicode_string(self):
-        self.database.insert([Person(first_name=u"דונלד", last_name=u"דאק")])
+        self.database.insert([Person(first_name="דונלד", last_name="דאק")])
         qs = Person.objects_in(self.database)
-        self._test_qs(qs.filter(first_name=u"דונלד"), 1)
+        self._test_qs(qs.filter(first_name="דונלד"), 1)
 
     def test_filter_float_field(self):
         qs = Person.objects_in(self.database)
@@ -306,7 +305,7 @@ class QuerySetTestCase(TestCaseWithData):
         self._insert_sample_model()
         qs = SampleModel.objects_in(self.database)
         for obj in qs:
-            self.assertTrue(obj.num_squared == obj.num ** 2)
+            self.assertTrue(obj.num_squared == obj.num**2)
 
     def test_count_of_slice(self):
         qs = Person.objects_in(self.database)
@@ -334,8 +333,8 @@ class QuerySetTestCase(TestCaseWithData):
         )
 
     def test_precedence_of_negation(self):
-        p = ~Q(first_name='a')
-        q = Q(last_name='b')
+        p = ~Q(first_name="a")
+        q = Q(last_name="b")
         r = p & q
         self.assertEqual(r.to_sql(Person), "(last_name = 'b') AND (NOT (first_name = 'a'))")
         r = q & p
@@ -353,7 +352,7 @@ class QuerySetTestCase(TestCaseWithData):
 
 class AggregateTestCase(TestCaseWithData):
     def setUp(self):
-        super(AggregateTestCase, self).setUp()
+        super().setUp()
         self.database.insert(self._sample_data())
 
     def test_aggregate_no_grouping(self):
@@ -598,7 +597,7 @@ class AggregateTestCase(TestCaseWithData):
         self.assertEqual(r.to_sql(StringyModel), "(NOT (x = 'eggs')) AND (y = 'spam')")
 
 
-Color = Enum("Color", u"red blue green yellow brown white black")
+Color = Enum("Color", "red blue green yellow brown white black")
 
 
 class StringyModel(Model):
@@ -607,7 +606,6 @@ class StringyModel(Model):
 
 
 class SampleModel(Model):
-
     timestamp = DateTimeField()
     materialized_date = DateField(materialized="toDate(timestamp)")
     num = Int32Field()
@@ -618,12 +616,10 @@ class SampleModel(Model):
 
 
 class SampleCollapsingModel(SampleModel):
-
     sign = Int8Field(default=1)
 
     engine = CollapsingMergeTree("materialized_date", ("num",), "sign")
 
 
 class Numbers(Model):
-
     number = UInt64Field()

@@ -77,7 +77,6 @@ Fruit = Enum("Fruit", [("apple", 1), ("banana", 2), ("orange", 3), ("cherry", -7
 
 
 class ModelWithEnum(Model):
-
     date_field = DateField()
     enum_field = Enum8Field(Fruit)
 
@@ -85,7 +84,6 @@ class ModelWithEnum(Model):
 
 
 class ModelWithEnumArray(Model):
-
     date_field = DateField()
     enum_array = ArrayField(Enum16Field(Fruit))
 

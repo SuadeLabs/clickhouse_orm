@@ -17,7 +17,7 @@ from .test_querysets import SampleModel
 
 class FuncsTestCase(TestCaseWithData):
     def setUp(self):
-        super(FuncsTestCase, self).setUp()
+        super().setUp()
         self.database.insert(self._sample_data())
 
     def _test_qs(self, qs, expected_count):
@@ -69,7 +69,7 @@ class FuncsTestCase(TestCaseWithData):
         # No args
         self.assertEqual(F("func").to_sql(), "func()")
         # String args
-        self.assertEqual(F("func", "Wendy's", u"Wendy's").to_sql(), "func('Wendy\\'s', 'Wendy\\'s')")
+        self.assertEqual(F("func", "Wendy's", "Wendy's").to_sql(), "func('Wendy\\'s', 'Wendy\\'s')")
         # Numeric args
         self.assertEqual(F("func", 1, 1.1, Decimal("3.3")).to_sql(), "func(1, 1.1, 3.3)")
         # Date args
@@ -187,7 +187,7 @@ class FuncsTestCase(TestCaseWithData):
         self._test_func(1 % two, 1)
         # sign
         self._test_func(-one, -1)
-        self._test_func(--one, 1)
+        self._test_func(-(-one), 1)  # noqa: B002 - we mean to negate twice
         self._test_func(+one, 1)
 
     def test_logical_operators(self):

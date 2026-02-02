@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 from clickhouse_orm.engines import Buffer
 from clickhouse_orm.models import BufferModel
 
@@ -20,5 +19,4 @@ class BufferTestCase(TestCaseWithData):
 
 
 class PersonBuffer(BufferModel, Person):
-
     engine = Buffer(Person)

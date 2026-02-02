@@ -10,7 +10,7 @@ from .utils import Page, arg_to_sql, comma_join, string_or_func
 # - check that field names are valid
 
 
-class Operator(object):
+class Operator:
     """
     Base class for filtering operators.
     """
@@ -161,7 +161,7 @@ register_operator("iendswith", LikeOperator("%{}", False))
 register_operator("iexact", IExactOperator())
 
 
-class Cond(object):
+class Cond:
     """
     An abstract object for storing a single query condition Field + Operator + Value.
     """
@@ -193,8 +193,7 @@ class FieldCond(Cond):
         return res
 
 
-class Q(object):
-
+class Q:
     AND_MODE = "AND"
     OR_MODE = "OR"
 
@@ -251,7 +250,7 @@ class Q(object):
             sql = condition_sql[0]
         else:
             # Each condition must be enclosed in brackets, or order of operations may be wrong
-            sql = "(%s)" % ") {} (".format(self._mode).join(condition_sql)
+            sql = "(%s)" % f") {self._mode} (".join(condition_sql)
 
         if self._negate:
             sql = "NOT (%s)" % sql
@@ -290,7 +289,7 @@ class Q(object):
         return q
 
 
-class QuerySet(object):
+class QuerySet:
     """
     A queryset is an object that represents a database query using a specific `Model`.
     It is lazy, meaning that it does not hit the database until you iterate over its
@@ -346,7 +345,7 @@ class QuerySet(object):
             # Slice
             assert s.step in (None, 1), "step is not supported in slices"
             start = s.start or 0
-            stop = s.stop or 2 ** 63 - 1
+            stop = s.stop or 2**63 - 1
             assert start >= 0 and stop >= 0, "negative indexes are not supported"
             assert start <= stop, "start of slice cannot be smaller than its end"
             qs = copy(self)
@@ -629,7 +628,7 @@ class AggregateQuerySet(QuerySet):
         ```
         At least one calculated field is required.
         """
-        super(AggregateQuerySet, self).__init__(base_qs._model_cls, base_qs._database)
+        super().__init__(base_qs._model_cls, base_qs._database)
         assert calculated_fields, "No calculated fields specified for aggregation"
         self._fields = grouping_fields
         self._grouping_fields = grouping_fields

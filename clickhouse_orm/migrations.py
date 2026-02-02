@@ -83,13 +83,13 @@ class AlterTable(ModelOperation):
         for name, field in self.model_class.fields().items():
             is_regular_field = not (field.materialized or field.alias)
             if name not in table_fields:
-                logger.info('        Add column %s', name)
-                cmd = 'ADD COLUMN %s %s' % (name, field.get_sql(db=database))
+                logger.info("        Add column %s", name)
+                cmd = "ADD COLUMN %s %s" % (name, field.get_sql(db=database))
                 if is_regular_field:
                     if prev_name:
-                        cmd += ' AFTER %s' % prev_name
+                        cmd += " AFTER %s" % prev_name
                     else:
-                        cmd += ' FIRST'
+                        cmd += " FIRST"
                 self._alter_table(database, cmd)
 
             if is_regular_field:

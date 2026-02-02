@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 import unittest
 from decimal import Decimal
 
@@ -64,7 +63,7 @@ class DecimalFieldsTest(unittest.TestCase):
             DecimalModel(dec=value)
 
     def test_assignment_error(self):
-        for value in ("abc", u"זה ארוך", None, float("NaN"), Decimal("-Infinity")):
+        for value in ("abc", "זה ארוך", None, float("NaN"), Decimal("-Infinity")):
             with self.assertRaises(ValueError):
                 DecimalModel(dec=value)
 
@@ -112,7 +111,6 @@ class DecimalFieldsTest(unittest.TestCase):
 
 
 class DecimalModel(Model):
-
     date_field = DateField()
     dec = DecimalField(15, 3)
     dec32 = Decimal32Field(4, default=17)

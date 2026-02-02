@@ -7,7 +7,6 @@ from clickhouse_orm.fields import DateField, DateTime64Field, DateTimeField, UIn
 
 
 class SimpleFieldsTest(unittest.TestCase):
-
     epoch = datetime(1970, 1, 1, tzinfo=pytz.utc)
     # Valid values
     dates = [

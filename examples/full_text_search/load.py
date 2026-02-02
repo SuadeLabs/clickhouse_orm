@@ -27,7 +27,7 @@ def parse_file(filename):
     The original_word may include punctuation characters.
     """
     stemmer = PorterStemmer()
-    with open(filename, "r", encoding="utf-8") as f:
+    with open(filename, encoding="utf-8") as f:
         for line in f:
             for word in line.split():
                 yield (word, stemmer.stem(trim_punctuation(word)))
@@ -45,11 +45,10 @@ def get_fragments(filename):
     for word, stem in parse_file(filename):
         idx += 1
         yield Fragment(document=document, idx=idx, word=word, stem=stem)
-    print("{} - {} words".format(filename, idx))
+    print(f"{filename} - {idx} words")
 
 
 if __name__ == "__main__":
-
     # Load NLTK data if necessary
     nltk.download("punkt")
     nltk.download("wordnet")

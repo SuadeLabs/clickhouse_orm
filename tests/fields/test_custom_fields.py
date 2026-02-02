@@ -36,7 +36,6 @@ class CustomFieldsTest(unittest.TestCase):
 
 
 class BooleanField(Field):
-
     # The ClickHouse column type to use
     db_type = "UInt8"
 

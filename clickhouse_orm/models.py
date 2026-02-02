@@ -125,7 +125,6 @@ class ModelBase(type):
     ad_hoc_model_cache = {}
 
     def __new__(metacls, name, bases, attrs):
-
         # Collect fields, constraints and indexes from parent classes
         fields = {}
         constraints = {}
@@ -170,7 +169,7 @@ class ModelBase(type):
             _defaults=defaults,
             _has_funcs_as_defaults=has_funcs_as_defaults,
         )
-        model = super(ModelBase, metacls).__new__(metacls, str(name), bases, attrs)
+        model = super().__new__(metacls, str(name), bases, attrs)
 
         # Let each field, constraint and index know its parent and its own name
         for n, obj in chain(fields, constraints.items(), indexes.items()):
@@ -180,24 +179,24 @@ class ModelBase(type):
         return model
 
     @classmethod
-    def create_ad_hoc_model(metacls, fields, model_name="AdHocModel"):
+    def create_ad_hoc_model(cls, fields, model_name="AdHocModel"):
         # fields is a list of tuples (name, db_type)
         # Check if model exists in cache
         fields = list(fields)
         cache_key = model_name + " " + str(fields)
-        if cache_key in metacls.ad_hoc_model_cache:
-            return metacls.ad_hoc_model_cache[cache_key]
+        if cache_key in cls.ad_hoc_model_cache:
+            return cls.ad_hoc_model_cache[cache_key]
         # Create an ad hoc model class
         attrs = {}
         for name, db_type in fields:
-            attrs[name] = metacls.create_ad_hoc_field(db_type)
-        model_class = metacls.__new__(metacls, model_name, (Model,), attrs)
+            attrs[name] = cls.create_ad_hoc_field(db_type)
+        model_class = cls.__new__(cls, model_name, (Model,), attrs)
         # Add the model class to the cache
-        metacls.ad_hoc_model_cache[cache_key] = model_class
+        cls.ad_hoc_model_cache[cache_key] = model_class
         return model_class
 
     @classmethod
-    def create_ad_hoc_field(metacls, db_type):
+    def create_ad_hoc_field(cls, db_type):
         import clickhouse_orm.fields as orm_fields
 
         # Enums
@@ -215,13 +214,13 @@ class ModelBase(type):
             )
         # Arrays
         if db_type.startswith("Array"):
-            inner_field = metacls.create_ad_hoc_field(db_type[6:-1])
+            inner_field = cls.create_ad_hoc_field(db_type[6:-1])
             return orm_fields.ArrayField(inner_field)
         # Tuples (poor man's version - convert to array)
         if db_type.startswith("Tuple"):
             types = [s.strip() for s in db_type[6:-1].split(",")]
             assert len(set(types)) == 1, "No support for mixed types in tuples - " + db_type
-            inner_field = metacls.create_ad_hoc_field(types[0])
+            inner_field = cls.create_ad_hoc_field(types[0])
             return orm_fields.ArrayField(inner_field)
         # FixedString
         if db_type.startswith("FixedString"):
@@ -235,11 +234,11 @@ class ModelBase(type):
             return field_class(*args)
         # Nullable
         if db_type.startswith("Nullable"):
-            inner_field = metacls.create_ad_hoc_field(db_type[9:-1])
+            inner_field = cls.create_ad_hoc_field(db_type[9:-1])
             return orm_fields.NullableField(inner_field)
         # LowCardinality
         if db_type.startswith("LowCardinality"):
-            inner_field = metacls.create_ad_hoc_field(db_type[15:-1])
+            inner_field = cls.create_ad_hoc_field(db_type[15:-1])
             return orm_fields.LowCardinalityField(inner_field)
         # Simple fields
         name = db_type + "Field"
@@ -276,7 +275,7 @@ class Model(metaclass=ModelBase):
         invalid values will cause a `ValueError` to be raised.
         Unrecognized field names will cause an `AttributeError`.
         """
-        super(Model, self).__init__()
+        super().__init__()
         # Assign default values
         self.__dict__.update(self._defaults)
         # Assign field values from keyword arguments
@@ -299,9 +298,9 @@ class Model(metaclass=ModelBase):
                 field.validate(value)
             except ValueError:
                 tp, v, tb = sys.exc_info()
-                new_msg = "{} (field '{}')".format(v, name)
+                new_msg = f"{v} (field '{name}')"
                 raise tp.with_traceback(tp(new_msg), tb)
-        super(Model, self).__setattr__(name, value)
+        super().__setattr__(name, value)
 
     def set_database(self, db):
         """
@@ -535,7 +534,7 @@ class DistributedModel(Model):
         This is done automatically when the instance is read from the database or written to it.
         """
         assert isinstance(self.engine, Distributed), "engine must be an instance of engines.Distributed"
-        res = super(DistributedModel, self).set_database(db)
+        res = super().set_database(db)
         return res
 
     @classmethod
@@ -579,7 +578,7 @@ class DistributedModel(Model):
         storage_models = [b for b in cls.__bases__ if issubclass(b, Model) and not issubclass(b, DistributedModel)]
         if not storage_models:
             raise TypeError(
-                "When defining Distributed engine without the table_name " "ensure that your model has a parent model"
+                "When defining Distributed engine without the table_name ensure that your model has a parent model"
             )
 
         if len(storage_models) > 1:
@@ -601,9 +600,7 @@ class DistributedModel(Model):
         cls.fix_engine_table()
 
         parts = [
-            "CREATE TABLE IF NOT EXISTS `{0}`.`{1}` AS `{0}`.`{2}`".format(
-                db.db_name, cls.table_name(), cls.engine.table_name
-            ),
+            f"CREATE TABLE IF NOT EXISTS `{db.db_name}`.`{cls.table_name()}` AS `{db.db_name}`.`{cls.engine.table_name}`",
             "ENGINE = " + cls.engine.create_table_sql(db),
         ]
         return "\n".join(parts)

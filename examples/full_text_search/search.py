@@ -78,7 +78,6 @@ def find(db, text):
 
 
 if __name__ == "__main__":
-
     # Initialize colored output
     init()
 

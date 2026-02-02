@@ -50,19 +50,31 @@ extend-exclude = ["./venv"]
 # to read about ruff rules check this: https://beta.ruff.rs/docs/rules/
 select = [
   "E",
-  "W",  # pycodestyle: E, W
-  "F",  # pyflakes: F
-  "B",  # flake8-bugbear: B
-  "N",  # pep8-naming: N
-  "ISC",  # flake8-implicit-str-concat: ISC
-  "PYI",  # flake8-pyi: PYI
+  "W",       # pycodestyle: E, W
+  "F",       # pyflakes: F
+  "B",       # flake8-bugbear: B
+  "ISC",     # flake8-implicit-str-concat: ISC
+  "N",       # pep8-naming: N
+  "PYI",     # flake8-pyi: PYI
   "RUF013",  # ruff: RUF (Specifically implicit-optional)
-  "T10",  # flake8-debugger
-  "UP",  # pyupgrade: U
-  "TC",  # flake8-type-checking
-  "RUF101",  # redirected-noqa: https://docs.astral.sh/ruff/rules/redirected-noqa/
   "RUF022",  # unsorted-dunder-all: https://docs.astral.sh/ruff/rules/unsorted-dunder-all/
   "RUF023",  # unsorted-dunder-slots: https://docs.astral.sh/ruff/rules/unsorted-dunder-slots/
+  "RUF101",  # redirected-noqa: https://docs.astral.sh/ruff/rules/redirected-noqa/
+  "T10",     # flake8-debugger
+  "TC",      # flake8-type-checking
+  "UP",      # pyupgrade: U
+]
+
+ignore = [
+  "B904",   # raising without from clause
+  "B905",   # zip without strict parameter
+  "E501",   # line-too-long
+  "F403",   # from module import *
+  "F405",   # name defined from star imports
+  "N802",   # function names often mirror clickhouse function names
+  "N806",   # dynamically created classes
+  "N999",   # migration module names: 1234.py
+  "UP031",  # percent formatting
 ]
 
 [tool.ruff.lint.isort]

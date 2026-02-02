@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 import datetime
 import unittest
 
@@ -180,7 +179,7 @@ class DatabaseTestCase(TestCaseWithData):
         self.assertEqual(page.number_of_objects, 10)
 
     def test_special_chars(self):
-        s = u"אבגד \\'\"`,.;éåäöšž\n\t\0\b\r"
+        s = "אבגד \\'\"`,.;éåäöšž\n\t\0\b\r"
         p = Person(first_name=s)
         self.database.insert([p])
         p = list(self.database.select("SELECT * from $table", Person))[0]
@@ -200,12 +199,12 @@ class DatabaseTestCase(TestCaseWithData):
             Database(self.database.db_name, username="default", password="wrong")
 
         exc = cm.exception
-        if exc.code == 193: # ClickHouse version < 20.3
-            self.assertTrue(exc.message.startswith('Wrong password for user default'))
-        elif exc.code == 516: # ClickHouse version >= 20.3
-            self.assertTrue(exc.message.startswith('default: Authentication failed'))
+        if exc.code == 193:  # ClickHouse version < 20.3
+            self.assertTrue(exc.message.startswith("Wrong password for user default"))
+        elif exc.code == 516:  # ClickHouse version >= 20.3
+            self.assertTrue(exc.message.startswith("default: Authentication failed"))
         else:
-            raise Exception('Unexpected error code - %s %s' % (exc.code, exc.message))
+            raise Exception(f"Unexpected error code - {exc.code} {exc.message}")
 
     def test_nonexisting_db(self):
         db = Database("db_not_here", autocreate=False)
@@ -274,7 +273,7 @@ class DatabaseTestCase(TestCaseWithData):
 
         query = "SELECT DISTINCT type FROM system.columns"
         for row in self.database.select(query):
-            if row.type.startswith('Map'):
+            if row.type.startswith("Map"):
                 continue  # Not supported yet
             ModelBase.create_ad_hoc_field(row.type)
 
@@ -294,7 +293,7 @@ class DatabaseTestCase(TestCaseWithData):
         query = "SELECT name FROM system.tables WHERE database='system'"
         for row in self.database.select(query):
             print(row.name)
-            if row.name in ('distributed_ddl_queue',):
+            if row.name in ("distributed_ddl_queue",):
                 continue  # Not supported
             try:
                 model = self.database.get_model_for_table(row.name, system_table=True)

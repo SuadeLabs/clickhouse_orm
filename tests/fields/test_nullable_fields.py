@@ -181,7 +181,6 @@ class NullableFieldsTest(unittest.TestCase):
 
 
 class ModelWithNullable(Model):
-
     date_field = DateField()
     null_str = NullableField(StringField(), extra_null_values={""})
     null_int = NullableField(Int32Field())
