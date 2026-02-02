@@ -2,6 +2,6 @@ from __future__ import annotations
 
 from clickhouse_orm import migrations
 
-from ..test_migrations import *
+from ..test_migrations import Model1
 
 operations = [migrations.CreateTable(Model1)]

@@ -218,9 +218,6 @@ class Q:
         if mode == l_child._mode and not l_child._negate:
             q = deepcopy(l_child)
             q._children.append(deepcopy(r_child))
-        elif mode == r_child._mode and not r_child._negate:
-            q = deepcopy(r_child)
-            q._children.append(deepcopy(l_child))
         else:
             q = cls()
             q._children = [l_child, r_child]

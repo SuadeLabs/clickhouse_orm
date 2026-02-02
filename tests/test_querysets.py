@@ -332,18 +332,6 @@ class QuerySetTestCase(TestCaseWithData):
             "(first_name = 'a') AND (greater(`height`, 1.7)) AND (last_name = 'b')",
         )
 
-    def test_precedence_of_negation(self):
-        p = ~Q(first_name="a")
-        q = Q(last_name="b")
-        r = p & q
-        self.assertEqual(r.to_sql(Person), "(last_name = 'b') AND (NOT (first_name = 'a'))")
-        r = q & p
-        self.assertEqual(r.to_sql(Person), "(last_name = 'b') AND (NOT (first_name = 'a'))")
-        r = q | p
-        self.assertEqual(r.to_sql(Person), "(last_name = 'b') OR (NOT (first_name = 'a'))")
-        r = ~q & p
-        self.assertEqual(r.to_sql(Person), "(NOT (last_name = 'b')) AND (NOT (first_name = 'a'))")
-
     def test_invalid_filter(self):
         qs = Person.objects_in(self.database)
         with self.assertRaises(TypeError):
@@ -589,12 +577,26 @@ class AggregateTestCase(TestCaseWithData):
         limited_qs = qs.limit_by((6, 3), "height")
         self.assertEqual([p.first_name for p in limited_qs[:3]], ["Norman", "Octavius", "Oliver"])
 
-    def test_boolean_logic(self):
-        p = ~Q(x="eggs")
-        q = Q(y="spam")
-        r = p & q
 
-        self.assertEqual(r.to_sql(StringyModel), "(NOT (x = 'eggs')) AND (y = 'spam')")
+def test_boolean_logic():
+    p = ~Q(x="eggs")
+    q = Q(y="spam")
+    r = p & q
+
+    assert r.to_sql(StringyModel) == "(NOT (x = 'eggs')) AND (y = 'spam')"
+
+
+def test_precedence_of_negation():
+    p = ~Q(first_name="a")
+    q = Q(last_name="b")
+    r = p & q
+    assert r.to_sql(Person) == "(NOT (first_name = 'a')) AND (last_name = 'b')"
+    r = q & p
+    assert r.to_sql(Person) == "(last_name = 'b') AND (NOT (first_name = 'a'))"
+    r = q | p
+    assert r.to_sql(Person) == "(last_name = 'b') OR (NOT (first_name = 'a'))"
+    r = ~q & p
+    assert r.to_sql(Person) == "(NOT (last_name = 'b')) AND (NOT (first_name = 'a'))"
 
 
 Color = Enum("Color", "red blue green yellow brown white black")
