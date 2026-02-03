@@ -4,7 +4,7 @@ build-backend = "flit_core.buildapi"
 
 [project]
 name = "clickhouse_orm"
-version = "2.2.2"
+version = "3.0.0"
 readme = "README.md"
 description = "A simple ORM for working with the Clickhouse database. Maintainance fork of infi.clickhouse_orm."
 authors = [

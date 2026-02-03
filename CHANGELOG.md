@@ -1,6 +1,17 @@
 Change Log
 ==========
 
+v3.0.0
+------
+- Support up to clickhouse 25.8
+- Some complex system tables containing arrays of tuples not yet supported
+- Removed iso8601 requirement
+
+**Backwards incompatible changes**
+
+- Dropped support for python < 3.11
+
+
 v2.2.2
 ------
 - Unpined requirements to enhance compatability
@@ -232,5 +243,3 @@ v0.7.0
 v0.6.3
 ------
 - Python 3 support
-
-
