@@ -7,10 +7,10 @@ name = "clickhouse_orm"
 version = "2.2.2"
 readme = "README.md"
 description = "A simple ORM for working with the Clickhouse database. Maintainance fork of infi.clickhouse_orm."
-# authors = ["olliemath <oliver.margetts@gmail.com>"]
-# license = "BSD"
-# homepage = "https://github.com/SuadeLabs/clickhouse_orm"
-# repository = "https://github.com/SuadeLabs/clickhouse_orm"
+authors = [
+  {name = "Oliver Margetts", email = "oliver.margetts@gmail.com"}
+]
+license = { text = "BSD-3-Clause" }
 classifiers = [
     "Intended Audience :: Developers",
     "Intended Audience :: System Administrators",
@@ -36,6 +36,10 @@ dev = [
   "pytest==9.0.2",
   "ruff==0.14.14",
 ]
+
+[project.urls]
+Homepage = "https://github.com/SuadeLabs/clickhouse_orm"
+Repository = "https://github.com/SuadeLabs/clickhouse_orm"
 
 [tool.ruff]
 line-length = 120
