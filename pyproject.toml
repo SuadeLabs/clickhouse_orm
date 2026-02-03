@@ -17,18 +17,17 @@ classifiers = [
     "License :: OSI Approved :: BSD License",
     "Operating System :: OS Independent",
     "Programming Language :: Python",
-    "Programming Language :: Python :: 3.6",
-    "Programming Language :: Python :: 3.7",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Topic :: Database",
 ]
-# requires_python = "sqlalchemy-utils>=0.41.1"
+# requires_python = ">=3.11"
 dependencies = [
     "requests",
     "pytz",
-    "iso8601",
 ]
 
 [project.optional-dependencies]
@@ -40,7 +39,7 @@ dev = [
 
 [tool.ruff]
 line-length = 120
-target-version = "py310"
+target-version = "py311"
 # File Selection
 force-exclude = true  # don't check excluded files even if passed directly
 extend-exclude = ["./venv"]

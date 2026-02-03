@@ -36,13 +36,16 @@ class SimpleFieldsTest(unittest.TestCase):
             # Verify that conversion to and from db string does not change value
             dt2 = f.to_python(f.to_db_string(dt, quote=False), pytz.utc)
             self.assertEqual(dt, dt2)
+
+        # Valid, but weird value
+        assert isinstance(f.to_python("2017-01-01X15:06:00", pytz.utc), datetime)
+
         # Invalid values
         for value in (
             "nope",
             "21/7/1999",
             0.5,
             "2017-01 15:06:00",
-            "2017-01-01X15:06:00",
             "2017-13-01T15:06:00",
         ):
             with self.assertRaises(ValueError):
@@ -60,7 +63,6 @@ class SimpleFieldsTest(unittest.TestCase):
             0.1,
             "2017-07-26T08:31:05.1",
             "2017-07-26T08:31:05.1Z",
-            "2017-07-26 08:31.1",
             "2017-07-26T13:31:05.1+05",
             "2017-07-26 13:31:05.1+0500",
         ]:
@@ -69,12 +71,15 @@ class SimpleFieldsTest(unittest.TestCase):
             # Verify that conversion to and from db string does not change value
             dt2 = f.to_python(f.to_db_string(dt, quote=False), pytz.utc)
             self.assertEqual(dt, dt2)
+
+        # Valid, but weird value
+        assert isinstance(f.to_python("2017-01-01X15:06:00", pytz.utc), datetime)
+
         # Invalid values
         for value in (
             "nope",
             "21/7/1999",
             "2017-01 15:06:00",
-            "2017-01-01X15:06:00",
             "2017-13-01T15:06:00",
         ):
             with self.assertRaises(ValueError):

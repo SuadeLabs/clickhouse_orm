@@ -7,7 +7,6 @@ from ipaddress import IPv4Address, IPv6Address
 from logging import getLogger
 from uuid import UUID
 
-import iso8601
 import pytz
 from pytz import BaseTzInfo
 
@@ -230,11 +229,8 @@ class DateTimeField(Field):
                     return datetime.datetime.utcfromtimestamp(value).replace(tzinfo=pytz.utc)
                 except ValueError:
                     pass
-            try:
-                # left the date naive in case of no tzinfo set
-                dt = iso8601.parse_date(value, default_timezone=None)
-            except iso8601.ParseError as e:
-                raise ValueError(str(e))
+            # left the date naive in case of no tzinfo set
+            dt = datetime.datetime.fromisoformat(value)
 
             # convert naive to aware
             if dt.tzinfo is None or dt.tzinfo.utcoffset(dt) is None:

@@ -4,7 +4,6 @@ click==7.1.2
 Flask==1.1.2
 idna==2.9
 clickhouse-orm==2.0.1
-iso8601==0.1.12
 itsdangerous==1.1.0
 Jinja2==2.11.3
 MarkupSafe==1.1.1
