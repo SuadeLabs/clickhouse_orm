@@ -33,14 +33,15 @@ Now we can collect usage statistics per CPU, and write them to the database:
 import psutil, time, datetime
 
 psutil.cpu_percent(percpu=True) # first sample should be discarded
-while True:
-    time.sleep(1)
-    stats = psutil.cpu_percent(percpu=True)
-    timestamp = datetime.datetime.now()
-    db.insert([
-        CPUStats(timestamp=timestamp, cpu_id=cpu_id, cpu_percent=cpu_percent)
-        for cpu_id, cpu_percent in enumerate(stats)
-    ])
+with db.session():  # use a requests session for efficiency
+    while True:
+        time.sleep(1)
+        stats = psutil.cpu_percent(percpu=True)
+        timestamp = datetime.datetime.now()
+        db.insert([
+            CPUStats(timestamp=timestamp, cpu_id=cpu_id, cpu_percent=cpu_percent)
+            for cpu_id, cpu_percent in enumerate(stats)
+        ])
 ```
 
 Querying the table is easy, using either the query builder or raw SQL:

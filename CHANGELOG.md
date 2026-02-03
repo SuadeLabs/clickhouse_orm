@@ -1,6 +1,11 @@
 Change Log
 ==========
 
+v3.1.0
+------
+- database now does not use a requests.Session by default
+- new `Database.session()` context-manager to recover the old behaviour
+
 v3.0.0
 ------
 - Support up to clickhouse 25.8
