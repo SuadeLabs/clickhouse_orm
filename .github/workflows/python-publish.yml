@@ -36,4 +36,4 @@ jobs:
           python -m build
           twine upload --verbose -u '__token__' dist/*
         env:
-          TWINE_TOKEN: ${{ secrets.TWINE_TOKEN }}
+          TWINE_PASSWORD: ${{ secrets.TWINE_TOKEN }}
