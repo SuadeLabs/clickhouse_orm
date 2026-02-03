@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import sys
 from html.parser import HTMLParser
 
@@ -5,7 +7,6 @@ HEADER_TAGS = ("h1", "h2", "h3")
 
 
 class HeadersToMarkdownParser(HTMLParser):
-
     inside = None
     text = ""
 

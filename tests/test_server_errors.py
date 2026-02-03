@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import unittest
 
 from clickhouse_orm.database import ServerError
@@ -5,7 +7,6 @@ from clickhouse_orm.database import ServerError
 
 class ServerErrorTest(unittest.TestCase):
     def test_old_format(self):
-
         code, msg = ServerError.get_error_code_msg(
             "Code: 81, e.displayText() = DB::Exception: Database db_not_here doesn't exist, e.what() = DB::Exception (from [::1]:33458)"
         )
@@ -22,7 +23,6 @@ class ServerErrorTest(unittest.TestCase):
         )
 
     def test_new_format(self):
-
         code, msg = ServerError.get_error_code_msg(
             "Code: 164, e.displayText() = DB::Exception: Cannot drop table in readonly mode"
         )

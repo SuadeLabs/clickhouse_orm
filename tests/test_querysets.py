@@ -1,8 +1,11 @@
-# -*- coding: utf-8 -*-
+from __future__ import annotations
+
 import unittest
 from datetime import date, datetime
 from enum import Enum
 from logging import getLogger
+
+import pytest
 
 from clickhouse_orm.database import Database
 from clickhouse_orm.engines import CollapsingMergeTree, Memory, MergeTree
@@ -18,7 +21,7 @@ logger = getLogger("tests")
 
 class QuerySetTestCase(TestCaseWithData):
     def setUp(self):
-        super(QuerySetTestCase, self).setUp()
+        super().setUp()
         self.database.insert(self._sample_data())
 
     def _test_qs(self, qs, expected_count):
@@ -85,10 +88,8 @@ class QuerySetTestCase(TestCaseWithData):
         )
         self._test_qs(
             qs.filter(
-                (
-                    Q(first_name__in=["Warren", "Whilemina", "Whitney"]) & Q(height__gte=1.7)
-                    | (Q(first_name__in=["Victoria", "Victor", "Venus"]) & Q(height__lt=1.7))
-                )
+                Q(first_name__in=["Warren", "Whilemina", "Whitney"]) & Q(height__gte=1.7)
+                | (Q(first_name__in=["Victoria", "Victor", "Venus"]) & Q(height__lt=1.7))
             ),
             4,
         )
@@ -112,9 +113,9 @@ class QuerySetTestCase(TestCaseWithData):
         )
 
     def test_filter_unicode_string(self):
-        self.database.insert([Person(first_name=u"דונלד", last_name=u"דאק")])
+        self.database.insert([Person(first_name="דונלד", last_name="דאק")])
         qs = Person.objects_in(self.database)
-        self._test_qs(qs.filter(first_name=u"דונלד"), 1)
+        self._test_qs(qs.filter(first_name="דונלד"), 1)
 
     def test_filter_float_field(self):
         qs = Person.objects_in(self.database)
@@ -166,7 +167,7 @@ class QuerySetTestCase(TestCaseWithData):
         person = list(qs.order_by("-first_name", "-last_name"))[0]
         self.assertEqual(person.first_name, "Yolanda")
         person = list(qs.order_by("height"))[0]
-        self.assertEqual(person.height, 1.59)
+        self.assertEqual(person.height, pytest.approx(1.59))
         person = list(qs.order_by("-height"))[0]
         self.assertEqual(person.height, 1.8)
 
@@ -306,7 +307,7 @@ class QuerySetTestCase(TestCaseWithData):
         self._insert_sample_model()
         qs = SampleModel.objects_in(self.database)
         for obj in qs:
-            self.assertTrue(obj.num_squared == obj.num ** 2)
+            self.assertTrue(obj.num_squared == obj.num**2)
 
     def test_count_of_slice(self):
         qs = Person.objects_in(self.database)
@@ -341,7 +342,7 @@ class QuerySetTestCase(TestCaseWithData):
 
 class AggregateTestCase(TestCaseWithData):
     def setUp(self):
-        super(AggregateTestCase, self).setUp()
+        super().setUp()
         self.database.insert(self._sample_data())
 
     def test_aggregate_no_grouping(self):
@@ -570,7 +571,7 @@ class AggregateTestCase(TestCaseWithData):
         self.assertEqual(qs.count(), 94)
         self.assertEqual(list(qs)[89].last_name, "Bowen")
         # Test with limit and offset, also mixing LIMIT with LIMIT BY
-        qs = Person.objects_in(self.database).filter(height__gt=1.67).order_by("height", "first_name")
+        qs = Person.objects_in(self.database).filter(height__gt=1.671).order_by("height", "first_name")
         limited_qs = qs.limit_by((0, 3), "height")
         self.assertEqual([p.first_name for p in limited_qs[:3]], ["Amanda", "Buffy", "Dora"])
         limited_qs = qs.limit_by((3, 3), "height")
@@ -578,15 +579,29 @@ class AggregateTestCase(TestCaseWithData):
         limited_qs = qs.limit_by((6, 3), "height")
         self.assertEqual([p.first_name for p in limited_qs[:3]], ["Norman", "Octavius", "Oliver"])
 
-    def test_boolean_logic(self):
-        p = ~Q(x="eggs")
-        q = Q(y="spam")
-        r = p & q
 
-        self.assertEqual(r.to_sql(StringyModel), "(NOT (x = 'eggs')) AND (y = 'spam')")
+def test_boolean_logic():
+    p = ~Q(x="eggs")
+    q = Q(y="spam")
+    r = p & q
+
+    assert r.to_sql(StringyModel) == "(NOT (x = 'eggs')) AND (y = 'spam')"
 
 
-Color = Enum("Color", u"red blue green yellow brown white black")
+def test_precedence_of_negation():
+    p = ~Q(first_name="a")
+    q = Q(last_name="b")
+    r = p & q
+    assert r.to_sql(Person) == "(NOT (first_name = 'a')) AND (last_name = 'b')"
+    r = q & p
+    assert r.to_sql(Person) == "(last_name = 'b') AND (NOT (first_name = 'a'))"
+    r = q | p
+    assert r.to_sql(Person) == "(last_name = 'b') OR (NOT (first_name = 'a'))"
+    r = ~q & p
+    assert r.to_sql(Person) == "(NOT (last_name = 'b')) AND (NOT (first_name = 'a'))"
+
+
+Color = Enum("Color", "red blue green yellow brown white black")
 
 
 class StringyModel(Model):
@@ -595,7 +610,6 @@ class StringyModel(Model):
 
 
 class SampleModel(Model):
-
     timestamp = DateTimeField()
     materialized_date = DateField(materialized="toDate(timestamp)")
     num = Int32Field()
@@ -606,12 +620,10 @@ class SampleModel(Model):
 
 
 class SampleCollapsingModel(SampleModel):
-
     sign = Int8Field(default=1)
 
     engine = CollapsingMergeTree("materialized_date", ("num",), "sign")
 
 
 class Numbers(Model):
-
     number = UInt64Field()

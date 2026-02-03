@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 import unittest
 
@@ -138,7 +140,6 @@ class NumberName(Model):
 
 
 class Region(Model):
-
     region_id = UInt64Field()
     parent_region = UInt64Field()
     region_name = StringField()

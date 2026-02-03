@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import sys
 
 from colorama import Fore, Style, init
@@ -78,7 +80,6 @@ def find(db, text):
 
 
 if __name__ == "__main__":
-
     # Initialize colored output
     init()
 

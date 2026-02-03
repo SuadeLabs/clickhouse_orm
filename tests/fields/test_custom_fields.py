@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import unittest
 
 from clickhouse_orm.database import Database
@@ -36,7 +38,6 @@ class CustomFieldsTest(unittest.TestCase):
 
 
 class BooleanField(Field):
-
     # The ClickHouse column type to use
     db_type = "UInt8"
 

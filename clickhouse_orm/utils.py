@@ -1,15 +1,27 @@
+from __future__ import annotations
+
 import codecs
 import importlib
 import pkgutil
 import re
-from collections import namedtuple
 from datetime import date, datetime, timedelta, tzinfo
 from inspect import isclass
-from types import ModuleType
-from typing import Any, Dict, Iterable, List, Optional, Type, Union
+from typing import TYPE_CHECKING, NamedTuple
 
-Page = namedtuple("Page", "objects number_of_objects pages_total number page_size")
-Page.__doc__ += "\nA simple data structure for paginated results."
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+    from types import ModuleType
+    from typing import Any
+
+
+class Page(NamedTuple):
+    """A simple data structure for paginated results."""
+
+    objects: list[Any]
+    number_of_objects: int
+    pages_total: int
+    number: int
+    page_size: int
 
 
 def escape(value: str, quote: bool = True) -> str:
@@ -25,7 +37,7 @@ def escape(value: str, quote: bool = True) -> str:
     return value
 
 
-def unescape(value: str) -> Optional[str]:
+def unescape(value: str) -> str | None:
     if value == "\\N":
         return None
     return codecs.escape_decode(value)[0].decode("utf-8")
@@ -70,7 +82,7 @@ def arg_to_sql(arg: Any) -> str:
     return str(arg)
 
 
-def parse_tsv(line: Union[bytes, str]) -> List[str]:
+def parse_tsv(line: bytes | str) -> list[str]:
     if isinstance(line, bytes):
         line = line.decode()
     if line and line[-1] == "\n":
@@ -78,7 +90,7 @@ def parse_tsv(line: Union[bytes, str]) -> List[str]:
     return [unescape(value) for value in line.split("\t")]
 
 
-def parse_array(array_string: str) -> List[Any]:
+def parse_array(array_string: str) -> list[Any]:
     """
     Parse an array or tuple string as returned by clickhouse. For example:
         "['hello', 'world']" ==> ["hello", "world"]
@@ -112,7 +124,7 @@ def parse_array(array_string: str) -> List[Any]:
             array_string = array_string[match.end() - 1 :]
 
 
-def import_submodules(package_name: str) -> Dict[str, ModuleType]:
+def import_submodules(package_name: str) -> dict[str, ModuleType]:
     """
     Import all submodules of a module.
     """
@@ -141,7 +153,7 @@ def is_iterable(obj: Any) -> bool:
         return False
 
 
-def get_subclass_names(locals: Dict[str, Any], base_class: Type):
+def get_subclass_names(locals: dict[str, Any], base_class: type):
     return [c.__name__ for c in locals.values() if isclass(c) and issubclass(c, base_class)]
 
 

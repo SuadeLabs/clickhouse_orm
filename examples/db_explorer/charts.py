@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import pygal
 from jinja2.filters import do_filesizeformat
 from pygal.style import RotateStyle
@@ -5,7 +7,7 @@ from pygal.style import RotateStyle
 
 # Formatting functions
 def number_formatter(v):
-    return "{:,}".format(v)
+    return f"{v:,}"
 
 
 def bytes_formatter(v):

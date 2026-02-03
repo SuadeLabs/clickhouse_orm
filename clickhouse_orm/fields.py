@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import datetime
 from calendar import timegm
 from decimal import Decimal, localcontext
@@ -5,7 +7,6 @@ from ipaddress import IPv4Address, IPv6Address
 from logging import getLogger
 from uuid import UUID
 
-import iso8601
 import pytz
 from pytz import BaseTzInfo
 
@@ -27,12 +28,12 @@ class Field(FunctionOperatorsMixin):
     db_type = None  # should be overridden by concrete subclasses
 
     def __init__(self, default=None, alias=None, materialized=None, readonly=None, codec=None):
-        assert [default, alias, materialized].count(
-            None
-        ) >= 2, "Only one of default, alias and materialized parameters can be given"
-        assert (
-            alias is None or isinstance(alias, F) or isinstance(alias, str) and alias != ""
-        ), "Alias parameter must be a string or function object, if given"
+        assert [default, alias, materialized].count(None) >= 2, (
+            "Only one of default, alias and materialized parameters can be given"
+        )
+        assert alias is None or isinstance(alias, F) or isinstance(alias, str) and alias != "", (
+            "Alias parameter must be a string or function object, if given"
+        )
         assert (
             materialized is None or isinstance(materialized, F) or isinstance(materialized, str) and materialized != ""
         ), "Materialized parameter must be a string or function object, if given"
@@ -117,7 +118,7 @@ class Field(FunctionOperatorsMixin):
         elif self.default:
             default = self.to_db_string(self.default)
             sql += " DEFAULT %s" % default
-        if self.codec and db and db.has_codec_support:
+        if self.codec and db and db.has_codec_support and not self.alias:
             sql += " CODEC(%s)" % self.codec
         return sql
 
@@ -141,7 +142,6 @@ class Field(FunctionOperatorsMixin):
 
 
 class StringField(Field):
-
     class_default = ""
     db_type = "String"
 
@@ -157,10 +157,10 @@ class FixedStringField(StringField):
     def __init__(self, length, default=None, alias=None, materialized=None, readonly=None):
         self._length = length
         self.db_type = "FixedString(%d)" % length
-        super(FixedStringField, self).__init__(default, alias, materialized, readonly)
+        super().__init__(default, alias, materialized, readonly)
 
     def to_python(self, value, timezone_in_use):
-        value = super(FixedStringField, self).to_python(value, timezone_in_use)
+        value = super().to_python(value, timezone_in_use)
         return value.rstrip("\0")
 
     def validate(self, value):
@@ -171,7 +171,6 @@ class FixedStringField(StringField):
 
 
 class DateField(Field):
-
     min_value = datetime.date(1970, 1, 1)
     max_value = datetime.date(2105, 12, 31)
     class_default = min_value
@@ -198,7 +197,6 @@ class DateField(Field):
 
 
 class DateTimeField(Field):
-
     class_default = datetime.datetime.fromtimestamp(0, pytz.utc)
     db_type = "DateTime"
 
@@ -231,11 +229,8 @@ class DateTimeField(Field):
                     return datetime.datetime.utcfromtimestamp(value).replace(tzinfo=pytz.utc)
                 except ValueError:
                     pass
-            try:
-                # left the date naive in case of no tzinfo set
-                dt = iso8601.parse_date(value, default_timezone=None)
-            except iso8601.ParseError as e:
-                raise ValueError(str(e))
+            # left the date naive in case of no tzinfo set
+            dt = datetime.datetime.fromisoformat(value)
 
             # convert naive to aware
             if dt.tzinfo is None or dt.tzinfo.utcoffset(dt) is None:
@@ -316,58 +311,50 @@ class BaseIntField(Field):
 
 
 class UInt8Field(BaseIntField):
-
     min_value = 0
-    max_value = 2 ** 8 - 1
+    max_value = 2**8 - 1
     db_type = "UInt8"
 
 
 class UInt16Field(BaseIntField):
-
     min_value = 0
-    max_value = 2 ** 16 - 1
+    max_value = 2**16 - 1
     db_type = "UInt16"
 
 
 class UInt32Field(BaseIntField):
-
     min_value = 0
-    max_value = 2 ** 32 - 1
+    max_value = 2**32 - 1
     db_type = "UInt32"
 
 
 class UInt64Field(BaseIntField):
-
     min_value = 0
-    max_value = 2 ** 64 - 1
+    max_value = 2**64 - 1
     db_type = "UInt64"
 
 
 class Int8Field(BaseIntField):
-
-    min_value = -(2 ** 7)
-    max_value = 2 ** 7 - 1
+    min_value = -(2**7)
+    max_value = 2**7 - 1
     db_type = "Int8"
 
 
 class Int16Field(BaseIntField):
-
-    min_value = -(2 ** 15)
-    max_value = 2 ** 15 - 1
+    min_value = -(2**15)
+    max_value = 2**15 - 1
     db_type = "Int16"
 
 
 class Int32Field(BaseIntField):
-
-    min_value = -(2 ** 31)
-    max_value = 2 ** 31 - 1
+    min_value = -(2**31)
+    max_value = 2**31 - 1
     db_type = "Int32"
 
 
 class Int64Field(BaseIntField):
-
-    min_value = -(2 ** 63)
-    max_value = 2 ** 63 - 1
+    min_value = -(2**63)
+    max_value = 2**63 - 1
     db_type = "Int64"
 
 
@@ -389,12 +376,10 @@ class BaseFloatField(Field):
 
 
 class Float32Field(BaseFloatField):
-
     db_type = "Float32"
 
 
 class Float64Field(BaseFloatField):
-
     db_type = "Float64"
 
 
@@ -414,7 +399,7 @@ class DecimalField(Field):
             self.exp = Decimal(10) ** -self.scale  # for rounding to the required scale
             self.max_value = Decimal(10 ** (self.precision - self.scale)) - self.exp
             self.min_value = -self.max_value
-        super(DecimalField, self).__init__(default, alias, materialized, readonly)
+        super().__init__(default, alias, materialized, readonly)
 
     def to_python(self, value, timezone_in_use):
         if not isinstance(value, Decimal):
@@ -440,19 +425,19 @@ class DecimalField(Field):
 
 class Decimal32Field(DecimalField):
     def __init__(self, scale, default=None, alias=None, materialized=None, readonly=None):
-        super(Decimal32Field, self).__init__(9, scale, default, alias, materialized, readonly)
+        super().__init__(9, scale, default, alias, materialized, readonly)
         self.db_type = "Decimal32(%d)" % scale
 
 
 class Decimal64Field(DecimalField):
     def __init__(self, scale, default=None, alias=None, materialized=None, readonly=None):
-        super(Decimal64Field, self).__init__(18, scale, default, alias, materialized, readonly)
+        super().__init__(18, scale, default, alias, materialized, readonly)
         self.db_type = "Decimal64(%d)" % scale
 
 
 class Decimal128Field(DecimalField):
     def __init__(self, scale, default=None, alias=None, materialized=None, readonly=None):
-        super(Decimal128Field, self).__init__(38, scale, default, alias, materialized, readonly)
+        super().__init__(38, scale, default, alias, materialized, readonly)
         self.db_type = "Decimal128(%d)" % scale
 
 
@@ -465,7 +450,7 @@ class BaseEnumField(Field):
         self.enum_cls = enum_cls
         if default is None:
             default = list(enum_cls)[0]
-        super(BaseEnumField, self).__init__(default, alias, materialized, readonly, codec)
+        super().__init__(default, alias, materialized, readonly, codec)
 
     def to_python(self, value, timezone_in_use):
         if isinstance(value, self.enum_cls):
@@ -512,24 +497,21 @@ class BaseEnumField(Field):
 
 
 class Enum8Field(BaseEnumField):
-
     db_type = "Enum8"
 
 
 class Enum16Field(BaseEnumField):
-
     db_type = "Enum16"
 
 
 class ArrayField(Field):
-
     class_default = []
 
     def __init__(self, inner_field, default=None, alias=None, materialized=None, readonly=None, codec=None):
         assert isinstance(inner_field, Field), "The first argument of ArrayField must be a Field instance"
         assert not isinstance(inner_field, ArrayField), "Multidimensional array fields are not supported by the ORM"
         self.inner_field = inner_field
-        super(ArrayField, self).__init__(default, alias, materialized, readonly, codec)
+        super().__init__(default, alias, materialized, readonly, codec)
 
     def to_python(self, value, timezone_in_use):
         if isinstance(value, str):
@@ -556,7 +538,6 @@ class ArrayField(Field):
 
 
 class UUIDField(Field):
-
     class_default = UUID(int=0)
     db_type = "UUID"
 
@@ -579,7 +560,6 @@ class UUIDField(Field):
 
 
 class IPv4Field(Field):
-
     class_default = 0
     db_type = "IPv4"
 
@@ -596,7 +576,6 @@ class IPv4Field(Field):
 
 
 class IPv6Field(Field):
-
     class_default = 0
     db_type = "IPv6"
 
@@ -613,18 +592,17 @@ class IPv6Field(Field):
 
 
 class NullableField(Field):
-
     class_default = None
 
     def __init__(self, inner_field, default=None, alias=None, materialized=None, extra_null_values=None, codec=None):
-        assert isinstance(
-            inner_field, Field
-        ), "The first argument of NullableField must be a Field instance. Not: {}".format(inner_field)
+        assert isinstance(inner_field, Field), (
+            f"The first argument of NullableField must be a Field instance. Not: {inner_field}"
+        )
         self.inner_field = inner_field
         self._null_values = [None]
         if extra_null_values:
             self._null_values.extend(extra_null_values)
-        super(NullableField, self).__init__(default, alias, materialized, readonly=None, codec=codec)
+        super().__init__(default, alias, materialized, readonly=None, codec=codec)
 
     def to_python(self, value, timezone_in_use):
         if value == "\\N" or value in self._null_values:
@@ -648,18 +626,18 @@ class NullableField(Field):
 
 class LowCardinalityField(Field):
     def __init__(self, inner_field, default=None, alias=None, materialized=None, readonly=None, codec=None):
-        assert isinstance(
-            inner_field, Field
-        ), "The first argument of LowCardinalityField must be a Field instance. Not: {}".format(inner_field)
-        assert not isinstance(
-            inner_field, LowCardinalityField
-        ), "LowCardinality inner fields are not supported by the ORM"
-        assert not isinstance(
-            inner_field, ArrayField
-        ), "Array field inside LowCardinality are not supported by the ORM. Use Array(LowCardinality) instead"
+        assert isinstance(inner_field, Field), (
+            f"The first argument of LowCardinalityField must be a Field instance. Not: {inner_field}"
+        )
+        assert not isinstance(inner_field, LowCardinalityField), (
+            "LowCardinality inner fields are not supported by the ORM"
+        )
+        assert not isinstance(inner_field, ArrayField), (
+            "Array field inside LowCardinality are not supported by the ORM. Use Array(LowCardinality) instead"
+        )
         self.inner_field = inner_field
         self.class_default = self.inner_field.class_default
-        super(LowCardinalityField, self).__init__(default, alias, materialized, readonly, codec)
+        super().__init__(default, alias, materialized, readonly, codec)
 
     def to_python(self, value, timezone_in_use):
         return self.inner_field.to_python(value, timezone_in_use)
@@ -676,9 +654,7 @@ class LowCardinalityField(Field):
         else:
             sql = self.inner_field.get_sql(with_default_expression=False)
             logger.warning(
-                "LowCardinalityField not supported on clickhouse-server version < 19.0 using {} as fallback".format(
-                    self.inner_field.__class__.__name__
-                )
+                f"LowCardinalityField not supported on clickhouse-server version < 19.0 using {self.inner_field.__class__.__name__} as fallback"
             )
         if with_default_expression:
             sql += self._extra_params(db)

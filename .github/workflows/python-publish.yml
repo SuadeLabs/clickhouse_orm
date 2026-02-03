@@ -1,9 +1,9 @@
 name: Upload to PIP
 
-# Controls when the action will run. 
+# Controls when the action will run.
 on:
   # Triggers the workflow when a release is created
-  release: 
+  release:
     types: [created]
   # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
@@ -18,23 +18,22 @@ jobs:
     # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
       # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v6
 
       # Sets up python
-      - uses: actions/setup-python@v2
+      - uses: actions/setup-python@v6
         with:
-          python-version: 3.9
+          python-version: "3.11"
 
       # Install dependencies
       - name: Install dependencies
         run: |
-          python -m pip install poetry
-          poetry install --no-dev
+          python -m pip install --upgrade build twine
 
       # Build and upload to PyPI
       - name: Builds and upload to PyPI
         run: |
-          poetry config pypi-token.pypi "$TWINE_TOKEN"
-          poetry publish --build
+          python -m build
+          twine upload --verbose -u '__token__' dist/*
         env:
           TWINE_TOKEN: ${{ secrets.TWINE_TOKEN }}

@@ -16,26 +16,53 @@ jobs:
       fail-fast: false
       matrix:
         # Lint on smallest and largest active versions
-        python-version: [3.6, 3.9]
+        python-version: ["3.11", "3.12", "3.14"]
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v6
     - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v2
+      uses: actions/setup-python@v6
       with:
         python-version: ${{ matrix.python-version }}
     - name: Install dependencies
       run: |
-        python -m pip install poetry
-        poetry install
-    - name: Lint with flake8
+        python -m pip install -e .[dev]
+    - name: Lint with ruff
       run: |
-        poetry run flake8
-    - name: Check formatting with black
+        ruff check .
+    - name: Check formatting with ruff
       run: |
-        poetry run black --check .
+        ruff format --check .
 
   test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.14", "pypy3.11"]
+
+    steps:
+    - uses: actions/checkout@v6
+    # We need to start ClickHouse manually to be able to mount our custom
+    # config file after git checkout
+    - name: Start ClickHouse with cluster config
+      run: |
+        docker run -d --rm --name ch -p 8123:8123 -e CLICKHOUSE_SKIP_USER_SETUP=1 \
+          -v "$GITHUB_WORKSPACE/tests/remote-servers.xml:/etc/clickhouse-server/config.d/remote_servers.xml:ro" \
+          clickhouse/clickhouse-server:25.8
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v6
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: Install dependencies
+      run: |
+        python -m pip install -e .[dev]
+    - name: Test with pytest
+      run: |
+        pytest .
+
+  test_compat_21_3:
+    # Tests compatibility with an older LTS release of clickhouse
     runs-on: ubuntu-latest
     services:
       clickhouse:
@@ -45,23 +72,22 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: [3.6, 3.7, 3.8, 3.9, pypy3]
+        python-version: ["3.11"]
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v6
     - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v2
+      uses: actions/setup-python@v6
       with:
         python-version: ${{ matrix.python-version }}
     - name: Install dependencies
       run: |
-        python -m pip install poetry
-        poetry install
+        python -m pip install -e .[dev]
     - name: Test with pytest
       run: |
-        poetry run pytest
+        pytest .
 
-  test_compat:
+  test_compat_20_8:
     # Tests compatibility with an older LTS release of clickhouse
     runs-on: ubuntu-latest
     services:
@@ -72,18 +98,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: [3.9]
+        python-version: ["3.11"]
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v6
     - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v2
+      uses: actions/setup-python@v6
       with:
         python-version: ${{ matrix.python-version }}
     - name: Install dependencies
       run: |
-        python -m pip install poetry
-        poetry install
+        python -m pip install -e .[dev]
     - name: Test with pytest
       run: |
-        poetry run pytest
+        pytest .

@@ -1,4 +1,5 @@
-# -*- coding: utf-8 -*-
+from __future__ import annotations
+
 import unittest
 
 from clickhouse_orm.database import Database
@@ -21,7 +22,7 @@ class FixedStringFieldsTest(unittest.TestCase):
                 FixedStringModel(date_field="2016-08-30", fstr_field=""),
                 FixedStringModel(date_field="2016-08-30"),
                 FixedStringModel(date_field="2016-08-31", fstr_field="foo"),
-                FixedStringModel(date_field="2016-08-31", fstr_field=u"לילה"),
+                FixedStringModel(date_field="2016-08-31", fstr_field="לילה"),
             ]
         )
 
@@ -30,7 +31,7 @@ class FixedStringFieldsTest(unittest.TestCase):
         self.assertEqual(results[0].fstr_field, "")
         self.assertEqual(results[1].fstr_field, "ABCDEFGHIJK")
         self.assertEqual(results[2].fstr_field, "foo")
-        self.assertEqual(results[3].fstr_field, u"לילה")
+        self.assertEqual(results[3].fstr_field, "לילה")
 
     def test_insert_and_select(self):
         self._insert_sample_data()
@@ -45,13 +46,12 @@ class FixedStringFieldsTest(unittest.TestCase):
         self._assert_sample_data(results)
 
     def test_assignment_error(self):
-        for value in (17, "this is too long", u"זה ארוך", None, 99.9):
+        for value in (17, "this is too long", "זה ארוך", None, 99.9):
             with self.assertRaises(ValueError):
                 FixedStringModel(fstr_field=value)
 
 
 class FixedStringModel(Model):
-
     date_field = DateField()
     fstr_field = FixedStringField(12, default="ABCDEFGHIJK")
 

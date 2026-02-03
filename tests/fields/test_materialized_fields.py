@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import unittest
 from datetime import date
 
@@ -65,7 +67,7 @@ class ModelWithMaterializedFields(Model):
 
     mat_str = StringField(materialized="lower(str_field)")
     mat_int = Int32Field(materialized="abs(int_field)")
-    mat_date = DateField(materialized=u"toDate(date_time_field)")
+    mat_date = DateField(materialized="toDate(date_time_field)")
     mat_func = StringField(materialized=F.lower(str_field))
 
     engine = MergeTree("mat_date", ("mat_date",))

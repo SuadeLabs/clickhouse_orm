@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import json
 import unittest
 
@@ -17,25 +19,21 @@ class JoinTest(unittest.TestCase):
         print(json.dumps([row.to_dict() for row in self.database.select(query)]))
 
     def test_without_db_name(self):
-        self.print_res("SELECT * FROM {}".format(Foo.table_name()))
-        self.print_res("SELECT * FROM {}".format(Bar.table_name()))
-        self.print_res("SELECT b FROM {} ALL LEFT JOIN {} USING id".format(Foo.table_name(), Bar.table_name()))
+        self.print_res(f"SELECT * FROM {Foo.table_name()}")
+        self.print_res(f"SELECT * FROM {Bar.table_name()}")
+        self.print_res(f"SELECT b FROM {Foo.table_name()} ALL LEFT JOIN {Bar.table_name()} USING id")
 
     def test_with_db_name(self):
-        self.print_res("SELECT * FROM $db.{}".format(Foo.table_name()))
-        self.print_res("SELECT * FROM $db.{}".format(Bar.table_name()))
-        self.print_res("SELECT b FROM $db.{} ALL LEFT JOIN $db.{} USING id".format(Foo.table_name(), Bar.table_name()))
+        self.print_res(f"SELECT * FROM $db.{Foo.table_name()}")
+        self.print_res(f"SELECT * FROM $db.{Bar.table_name()}")
+        self.print_res(f"SELECT b FROM $db.{Foo.table_name()} ALL LEFT JOIN $db.{Bar.table_name()} USING id")
 
     def test_with_subquery(self):
         self.print_res(
-            "SELECT b FROM {} ALL LEFT JOIN (SELECT * from {}) subquery USING id".format(
-                Foo.table_name(), Bar.table_name()
-            )
+            f"SELECT b FROM {Foo.table_name()} ALL LEFT JOIN (SELECT * from {Bar.table_name()}) subquery USING id"
         )
         self.print_res(
-            "SELECT b FROM $db.{} ALL LEFT JOIN (SELECT * from $db.{}) subquery USING id".format(
-                Foo.table_name(), Bar.table_name()
-            )
+            f"SELECT b FROM $db.{Foo.table_name()} ALL LEFT JOIN (SELECT * from $db.{Bar.table_name()}) subquery USING id"
         )
 
 

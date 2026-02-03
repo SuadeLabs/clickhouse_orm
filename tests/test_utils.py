@@ -1,4 +1,5 @@
-# -*- coding: utf-8 -*-
+from __future__ import annotations
+
 from clickhouse_orm.utils import escape, unescape
 
 SPECIAL_CHARS = {
@@ -14,7 +15,6 @@ SPECIAL_CHARS = {
 
 
 def test_unescape():
-
     for input_, expected in (
         ("π\\t", "π\t"),
         ("\\new", "\new"),
@@ -25,7 +25,6 @@ def test_unescape():
 
 
 def test_escape_special_chars():
-
     initial = "".join(SPECIAL_CHARS.keys())
     expected = "".join(SPECIAL_CHARS.values())
     assert escape(initial, quote=False) == expected
@@ -33,6 +32,5 @@ def test_escape_special_chars():
 
 
 def test_escape_unescape_parity():
-
     for initial in ("π\t", "\new", "cheeky 🐵", "back \\ slash", "\\\\n"):
         assert unescape(escape(initial, quote=False)) == initial

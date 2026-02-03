@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import datetime
 import logging
 import unittest
@@ -30,18 +32,10 @@ class _EnginesHelperTestCase(unittest.TestCase):
 
 
 class EnginesTestCase(_EnginesHelperTestCase):
-    def _create_and_insert(self, model_class):
+    def _create_and_insert(self, model_class, **kwargs):
         self.database.create_table(model_class)
         self.database.insert(
-            [
-                model_class(
-                    date="2017-01-01",
-                    event_id=23423,
-                    event_group=13,
-                    event_count=7,
-                    event_version=1,
-                )
-            ]
+            [model_class(date="2017-01-01", event_id=23423, event_group=13, event_count=7, event_version=1, **kwargs)]
         )
 
     def test_merge_tree(self):
@@ -236,7 +230,7 @@ class EnginesTestCase(_EnginesHelperTestCase):
             )
 
         self._create_and_insert(TestModel)
-        self._create_and_insert(TestCollapseModel)
+        self._create_and_insert(TestCollapseModel, sign=1)
 
         # Result order may be different, lets sort manually
         parts = sorted(list(SystemPart.get(self.database)), key=lambda x: x.table)
@@ -269,13 +263,12 @@ class EnginesTestCase(_EnginesHelperTestCase):
             )
 
         self._create_and_insert(TestModel)
-        self._create_and_insert(TestCollapseModel)
+        self._create_and_insert(TestCollapseModel, sign=1)
 
         self.assertEqual(2, len(list(SystemPart.get(self.database))))
 
 
 class SampleModel(Model):
-
     date = DateField()
     event_id = UInt32Field()
     event_group = UInt32Field()
@@ -316,7 +309,7 @@ class DistributedTestCase(_EnginesHelperTestCase):
             self.database.count(d_model)
 
         exc = cm.exception
-        self.assertEqual(exc.code, 170)
+        self.assertIn(exc.code, (170, 701))  # Different ClickHouse versions have different error codes
         self.assertTrue(exc.message.startswith("Requested cluster 'cluster_name' not found"))
 
     def test_verbose_engine_two_superclasses(self):
@@ -368,7 +361,7 @@ class DistributedTestCase(_EnginesHelperTestCase):
         exc = cm.exception
         self.assertEqual(
             str(exc),
-            "When defining Distributed engine without the table_name ensure " "that your model has a parent model",
+            "When defining Distributed engine without the table_name ensure that your model has a parent model",
         )
 
     def _test_insert_select(self, local_to_distributed, test_model=TestModel, include_readonly=True):

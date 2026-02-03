@@ -1,6 +1,17 @@
 Change Log
 ==========
 
+v3.0.0
+------
+- Support up to clickhouse 25.8
+- Some complex system tables containing arrays of tuples not yet supported
+- Removed iso8601 requirement
+
+**Backwards incompatible changes**
+
+- Dropped support for python < 3.11
+
+
 v2.2.2
 ------
 - Unpined requirements to enhance compatability
@@ -20,6 +31,22 @@ v2.2.0
 **Backwards incompatible changes**
 
 You can no longer supply a codec for an `alias` field. Previously this had no effect in clickhouse, but now it explicitly returns an error.
+
+v2.1.3
+------
+- Fix pagination for models with alias columns
+
+v2.1.2
+------
+- Add `QuerySet.model` to support django-rest-framework 3
+
+v2.1.1
+------
+- Improve support of ClickHouse v21.9 (mangototango)
+- Ignore non-numeric parts in ClickHouse version (mangototango)
+- Fix precedence of ~ operator in Q objects	(mangototango)
+- Support for adding a column to the beginning of a table (meanmail)
+- Add stddevPop and stddevSamp functions (k.peskov)
 
 v2.1.0
 ------
@@ -216,5 +243,3 @@ v0.7.0
 v0.6.3
 ------
 - Python 3 support
-
-

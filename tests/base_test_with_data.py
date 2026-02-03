@@ -1,4 +1,5 @@
-# -*- coding: utf-8 -*-
+from __future__ import annotations
+
 import logging
 import unittest
 
@@ -35,7 +36,6 @@ class TestCaseWithData(unittest.TestCase):
 
 
 class Person(Model):
-
     first_name = StringField()
     last_name = LowCardinalityField(StringField())
     birthday = DateField()

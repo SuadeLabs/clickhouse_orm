@@ -1,4 +1,6 @@
 # Add tests to path so that migrations will be importable
+from __future__ import annotations
+
 import logging
 import os
 import sys
@@ -21,7 +23,6 @@ from clickhouse_orm.fields import (
     LowCardinalityField,
     NullableField,
     StringField,
-    UInt64Field,
 )
 from clickhouse_orm.migrations import MigrationHistory
 from clickhouse_orm.models import BufferModel, Constraint, Index, Model
@@ -73,7 +74,7 @@ class MigrationsTestCase(unittest.TestCase):
                 ("f3", "Float32"),
                 ("f2", "String"),
                 ("f4", "String"),
-                ("f5", "Array(UInt64)"),
+                ("f5", "Array(String)"),
             ],
         )
         self.database.migrate("tests.sample_migrations", 5)
@@ -165,17 +166,17 @@ class MigrationsTestCase(unittest.TestCase):
         )
         # Codecs and low cardinality
         self.database.migrate("tests.sample_migrations", 15)
-        self.assertTrue(self.table_exists(Model4_compressed))
+        self.assertTrue(self.table_exists(Model4Compressed))
         if self.database.has_low_cardinality_support:
             self.assertEqual(
                 self.get_table_fields(Model2LowCardinality),
                 [
                     ("date", "Date"),
-                    ("f1", "LowCardinality(Int32)"),
-                    ("f3", "LowCardinality(Float32)"),
+                    ("f1", "Int32"),
+                    ("f3", "Float32"),
                     ("f2", "LowCardinality(String)"),
                     ("f4", "LowCardinality(Nullable(String))"),
-                    ("f5", "Array(LowCardinality(UInt64))"),
+                    ("f5", "Array(LowCardinality(String))"),
                 ],
             )
         else:
@@ -188,7 +189,7 @@ class MigrationsTestCase(unittest.TestCase):
                     ("f3", "Float32"),
                     ("f2", "String"),
                     ("f4", "Nullable(String)"),
-                    ("f5", "Array(UInt64)"),
+                    ("f5", "Array(String)"),
                 ],
             )
 
@@ -226,7 +227,6 @@ class MigrationsTestCase(unittest.TestCase):
 
 
 class Model1(Model):
-
     date = DateField()
     f1 = Int32Field()
     f2 = StringField()
@@ -239,13 +239,12 @@ class Model1(Model):
 
 
 class Model2(Model):
-
     date = DateField()
     f1 = Int32Field()
     f3 = Float32Field()
     f2 = StringField()
     f4 = StringField()
-    f5 = ArrayField(UInt64Field())  # addition of an array field
+    f5 = ArrayField(StringField())  # addition of an array field
 
     engine = MergeTree("date", ("date",))
 
@@ -255,7 +254,6 @@ class Model2(Model):
 
 
 class Model3(Model):
-
     date = DateField()
     f1 = Int64Field()  # changed from Int32
     f3 = Float64Field()  # changed from Float32
@@ -269,7 +267,6 @@ class Model3(Model):
 
 
 class EnumModel1(Model):
-
     date = DateField()
     f1 = Enum8Field(Enum("SomeEnum1", "dog cat cow"))
 
@@ -281,7 +278,6 @@ class EnumModel1(Model):
 
 
 class EnumModel2(Model):
-
     date = DateField()
     f1 = Enum16Field(Enum("SomeEnum2", "dog cat horse pig"))  # changed type and values
 
@@ -341,7 +337,6 @@ class AliasModel1(Model):
 
 
 class Model4(Model):
-
     date = DateField()
     f1 = Int32Field()
     f2 = StringField()
@@ -354,7 +349,6 @@ class Model4(Model):
 
 
 class Model4Buffer(BufferModel, Model4):
-
     engine = Buffer(Model4)
 
     @classmethod
@@ -362,8 +356,7 @@ class Model4Buffer(BufferModel, Model4):
         return "model4buffer"
 
 
-class Model4_changed(Model):
-
+class Model4Changed(Model):
     date = DateField()
     f3 = DateTimeField()
     f2 = StringField()
@@ -375,17 +368,15 @@ class Model4_changed(Model):
         return "model4"
 
 
-class Model4Buffer_changed(BufferModel, Model4_changed):
-
-    engine = Buffer(Model4_changed)
+class Model4BufferChanged(BufferModel, Model4Changed):
+    engine = Buffer(Model4Changed)
 
     @classmethod
     def table_name(cls):
         return "model4buffer"
 
 
-class Model4_compressed(Model):
-
+class Model4Compressed(Model):
     date = DateField()
     f3 = DateTimeField(codec="Delta,ZSTD(10)")
     f2 = StringField(codec="LZ4HC")
@@ -399,11 +390,11 @@ class Model4_compressed(Model):
 
 class Model2LowCardinality(Model):
     date = DateField()
-    f1 = LowCardinalityField(Int32Field())
-    f3 = LowCardinalityField(Float32Field())
+    f1 = Int32Field()
+    f3 = Float32Field()
     f2 = LowCardinalityField(StringField())
     f4 = LowCardinalityField(NullableField(StringField()))
-    f5 = ArrayField(LowCardinalityField(UInt64Field()))
+    f5 = ArrayField(LowCardinalityField(StringField()))
 
     engine = MergeTree("date", ("date",))
 
@@ -413,7 +404,6 @@ class Model2LowCardinality(Model):
 
 
 class ModelWithConstraints(Model):
-
     date = DateField()
     f1 = Int32Field()
     f2 = StringField()
@@ -429,7 +419,6 @@ class ModelWithConstraints(Model):
 
 
 class ModelWithConstraints2(Model):
-
     date = DateField()
     f1 = Int32Field()
     f2 = StringField()
@@ -445,7 +434,6 @@ class ModelWithConstraints2(Model):
 
 
 class ModelWithIndex(Model):
-
     date = DateField()
     f1 = Int32Field()
     f2 = StringField()
@@ -461,7 +449,6 @@ class ModelWithIndex(Model):
 
 
 class ModelWithIndex2(Model):
-
     date = DateField()
     f1 = Int32Field()
     f2 = StringField()

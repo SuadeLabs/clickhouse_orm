@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import datetime
 import logging
 import re
@@ -13,12 +15,10 @@ from .utils import Page, import_submodules, parse_tsv
 logger = logging.getLogger("clickhouse_orm")
 
 
-class DatabaseException(Exception):
+class DatabaseException(Exception):  # noqa: N818
     """
     Raised when a database operation fails.
     """
-
-    pass
 
 
 class ServerError(DatabaseException):
@@ -35,7 +35,7 @@ class ServerError(DatabaseException):
             # just skip custom init
             # if non-standard message format
             self.message = message
-            super(ServerError, self).__init__(message)
+            super().__init__(message)
 
     ERROR_PATTERNS = (
         # ClickHouse prior to v19.3.3
@@ -52,6 +52,14 @@ class ServerError(DatabaseException):
             r"""
             Code:\ (?P<code>\d+),
             \ e\.displayText\(\)\ =\ (?P<type1>[^ \n]+):\ (?P<msg>.+)
+        """,
+            re.VERBOSE | re.DOTALL,
+        ),
+        # ClickHouse v21+
+        re.compile(
+            r"""
+            Code:\ (?P<code>\d+).
+            \ (?P<type1>[^ \n]+):\ (?P<msg>.+)
         """,
             re.VERBOSE | re.DOTALL,
         ),
@@ -75,19 +83,21 @@ class ServerError(DatabaseException):
 
     def __str__(self):
         if self.code is not None:
-            return "{} ({})".format(self.message, self.code)
+            return f"{self.message} ({self.code})"
 
 
-class Database(object):
+class Database:
     """
     Database instances connect to a specific ClickHouse database for running queries,
     inserting data and other operations.
     """
 
+    _default_url = "http://localhost:8123/"
+
     def __init__(
         self,
         db_name,
-        db_url="http://localhost:8123/",
+        db_url=None,
         username=None,
         password=None,
         readonly=False,
@@ -111,7 +121,7 @@ class Database(object):
         - `log_statements`: when True, all database statements are logged.
         """
         self.db_name = db_name
-        self.db_url = db_url
+        self.db_url = db_url or self._default_url
         self.readonly = False
         self.timeout = timeout
         self.request_session = requests.Session()
@@ -432,7 +442,7 @@ class Database(object):
         except ServerError as e:
             logger.exception("Cannot determine server version (%s), assuming 1.1.0", e)
             ver = "1.1.0"
-        return tuple(int(n) for n in ver.split(".")) if as_tuple else ver
+        return tuple(int(n) for n in ver.split(".") if n.isdigit()) if as_tuple else ver
 
     def _is_existing_database(self):
         r = self._send("SELECT count() FROM system.databases WHERE name = '%s'" % self.db_name)

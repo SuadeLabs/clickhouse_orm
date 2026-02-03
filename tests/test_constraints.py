@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import unittest
 
 from clickhouse_orm import Constraint, Database, F, ServerError
@@ -58,6 +60,5 @@ class ConstraintsTest(unittest.TestCase):
 
 
 class PersonWithConstraints(Person):
-
     birthday_in_the_past = Constraint(Person.birthday <= F.today())
     max_height = Constraint(Person.height <= 2.75)

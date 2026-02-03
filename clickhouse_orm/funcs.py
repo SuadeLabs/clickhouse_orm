@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from functools import wraps
 from inspect import Parameter, signature
 from types import FunctionType
@@ -86,7 +88,7 @@ def parametric(func):
     return wrapper
 
 
-class FunctionOperatorsMixin(object):
+class FunctionOperatorsMixin:
     """
     A mixin for implementing Python operators using F objects.
     """
@@ -186,7 +188,6 @@ class FunctionOperatorsMixin(object):
 
 
 class FMeta(type):
-
     FUNCTION_COMBINATORS = {
         "type_conversion": [
             {"suffix": "OrZero"},
@@ -409,7 +410,7 @@ class F(Cond, FunctionOperatorsMixin, metaclass=FMeta):
 
     @staticmethod
     def toQuarter(d, timezone=NO_VALUE):
-        return F("toQuarter", d, timezone)
+        return F("toQuarter", d, timezone) if timezone else F("toQuarter", d)
 
     @staticmethod
     def toMonth(d, timezone=NO_VALUE):
@@ -421,7 +422,7 @@ class F(Cond, FunctionOperatorsMixin, metaclass=FMeta):
 
     @staticmethod
     def toISOWeek(d, timezone=NO_VALUE):
-        return F("toISOWeek", d, timezone)
+        return F("toISOWeek", d, timezone) if timezone else F("toISOWeek", d)
 
     @staticmethod
     def toDayOfYear(d, timezone=NO_VALUE):
@@ -509,15 +510,15 @@ class F(Cond, FunctionOperatorsMixin, metaclass=FMeta):
 
     @staticmethod
     def toYYYYMM(dt, timezone=NO_VALUE):
-        return F("toYYYYMM", dt, timezone)
+        return F("toYYYYMM", dt, timezone) if timezone else F("toYYYYMM", dt)
 
     @staticmethod
     def toYYYYMMDD(dt, timezone=NO_VALUE):
-        return F("toYYYYMMDD", dt, timezone)
+        return F("toYYYYMMDD", dt, timezone) if timezone else F("toYYYYMMDD", dt)
 
     @staticmethod
     def toYYYYMMDDhhmmss(dt, timezone=NO_VALUE):
-        return F("toYYYYMMDDhhmmss", dt, timezone)
+        return F("toYYYYMMDDhhmmss", dt, timezone) if timezone else F("toYYYYMMDDhhmmss", dt)
 
     @staticmethod
     def toRelativeYearNum(d, timezone=NO_VALUE):
@@ -910,8 +911,6 @@ class F(Cond, FunctionOperatorsMixin, metaclass=FMeta):
     @staticmethod
     def replace(haystack, pattern, replacement):
         return F("replace", haystack, pattern, replacement)
-
-    replaceAll = replace
 
     @staticmethod
     def replaceAll(haystack, pattern, replacement):
@@ -1648,6 +1647,16 @@ class F(Cond, FunctionOperatorsMixin, metaclass=FMeta):
     @aggregate
     def varSamp(x):
         return F("varSamp", x)
+
+    @staticmethod
+    @aggregate
+    def stddevPop(expr):
+        return F("stddevPop", expr)
+
+    @staticmethod
+    @aggregate
+    def stddevSamp(expr):
+        return F("stddevSamp", expr)
 
     @staticmethod
     @aggregate

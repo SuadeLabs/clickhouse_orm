@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import unittest
 
 from clickhouse_orm import Database, F, Index, MergeTree, Model
@@ -18,7 +20,6 @@ class IndexesTest(unittest.TestCase):
 
 
 class ModelWithIndexes(Model):
-
     date = DateField()
     f1 = Int32Field()
     f2 = StringField()
