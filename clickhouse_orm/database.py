@@ -3,7 +3,6 @@ from __future__ import annotations
 import datetime
 import logging
 import re
-from contextlib import contextmanager
 from math import ceil
 from string import Template
 
@@ -106,7 +105,6 @@ class Database:
         timeout=60,
         verify_ssl_cert=True,
         log_statements=False,
-        session=None,
     ):
         """
         Initializes a database instance. Unless it's readonly, the database will be
@@ -124,13 +122,12 @@ class Database:
         """
         self.db_name = db_name
         self.db_url = db_url or self._default_url
-        self.readonly = self.connection_readonly = False
+        self.readonly = False
         self.timeout = timeout
-        self.verify_ssl_cert = verify_ssl_cert
-        self.request_session = None
-        self.__username = username
-        self.__password = password
-
+        self.request_session = requests.Session()
+        self.request_session.verify = verify_ssl_cert
+        if username:
+            self.request_session.auth = (username, password or "")
         self.log_statements = log_statements
         self.settings = {}
         self.db_exists = False  # this is required before running _is_existing_database
@@ -149,22 +146,6 @@ class Database:
         self.has_codec_support = self.server_version >= (19, 1, 16)
         # Version 19.0 and above support LowCardinality
         self.has_low_cardinality_support = self.server_version >= (19, 0)
-
-    @contextmanager
-    def session(self):
-        """Contextmanager to use a persistent session for requests.
-
-        This can be quicker if making lots of small queries.
-        """
-        with requests.Session() as session:
-            session.verify = self.verify_ssl_cert
-            if self.__username:
-                session.auth = (self.__username, self.__password or "")
-            self.request_session = session
-            try:
-                yield self
-            finally:
-                self.request_session = None
 
     def create_database(self):
         """
@@ -417,20 +398,7 @@ class Database:
             if self.log_statements:
                 logger.info(data)
         params = self._build_params(settings)
-
-        if self.request_session:
-            r = self.request_session.post(self.db_url, params=params, data=data, stream=stream, timeout=self.timeout)
-        else:
-            r = requests.post(
-                self.db_url,
-                params=params,
-                data=data,
-                stream=stream,
-                timeout=self.timeout,
-                verify=self.verify_ssl_cert,
-                auth=(self.__username, self.__password or "") if self.__username else None,
-            )
-
+        r = self.request_session.post(self.db_url, params=params, data=data, stream=stream, timeout=self.timeout)
         if r.status_code != 200:
             raise ServerError(r.text)
         return r

@@ -1,6 +1,10 @@
 Change Log
 ==========
 
+v3.2.0
+------
+- bugfix: revert changes to session handling
+
 v3.1.0
 ------
 - database now does not use a requests.Session by default

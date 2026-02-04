@@ -324,15 +324,3 @@ class DatabaseTestCase(TestCaseWithData):
                     pass
                 else:
                     raise
-
-    def test_database_session(self):
-        assert self.database.request_session is None
-
-        with self.database.session() as session_db:
-            assert session_db is self.database
-            assert session_db.request_session is not None
-
-            self.database.insert(self._sample_data())
-            self.assertEqual(self.database.count(Person), 100)
-
-        assert self.database.request_session is None
