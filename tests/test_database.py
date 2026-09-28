@@ -275,13 +275,22 @@ class DatabaseTestCase(TestCaseWithData):
 
         query = "SELECT DISTINCT type FROM system.columns"
         for row in self.database.select(query):
-            if row.type.startswith("Map"):
+            if row.type.startswith(("Map", "Array(Map")):
                 continue  # Not supported yet
             if row.type.startswith("Array(Tuple"):
                 continue  # Not supported yet
             if row.type == "Tuple(UInt64, UInt64, UUID)":
                 continue  # Not supported yet
+            if row.type in ("Bool", "UInt128", "Array(Dynamic)", "Array(Array(String))"):
+                continue  # Not supported yet (found in newer servers, e.g. 26.8)
             ModelBase.create_ad_hoc_field(row.type)
+
+    def test_create_ad_hoc_field__unsupported(self):
+        from clickhouse_orm.models import ModelBase
+
+        for db_type in ("Array(Array(String))", "Array(Tuple(name String, type String))", "Dynamic"):
+            with self.assertRaises(NotImplementedError):
+                ModelBase.create_ad_hoc_field(db_type)
 
     def test_get_model_for_table(self):
         # Tests that get_model_for_table works for a non-system model

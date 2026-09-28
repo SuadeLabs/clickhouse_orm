@@ -218,6 +218,8 @@ class ModelBase(type):
         # Arrays
         if db_type.startswith("Array"):
             inner_field = cls.create_ad_hoc_field(db_type[6:-1])
+            if isinstance(inner_field, orm_fields.ArrayField):
+                raise NotImplementedError("No field class for multidimensional arrays - %s" % db_type)
             return orm_fields.ArrayField(inner_field)
         # Tuples (poor man's version - convert to array)
         if db_type.startswith("Tuple"):

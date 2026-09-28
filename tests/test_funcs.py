@@ -45,6 +45,10 @@ class FuncsTestCase(TestCaseWithData):
                 return  # ignore functions that don't exist in the used ClickHouse version
             raise
 
+    def _to_time_returns_datetime(self):
+        # Newer servers (e.g. 26.8) return the `Time` type, which the ORM does not support, and take no timezone
+        return self.database.raw("SELECT toTypeName(toTime(now()))").strip().startswith("DateTime")
+
     def _test_func(self, func, expected_value=NO_VALUE):
         result = self._call_func(func)
         if expected_value != NO_VALUE:
@@ -269,7 +273,8 @@ class FuncsTestCase(TestCaseWithData):
             datetime(2018, 12, 31, 11, 20, 0),
         )
         self._test_func(F.toStartOfWeek(dt), date(2018, 12, 30))
-        self._test_func(F.toTime(dt), datetime(1970, 1, 2, 11, 22, 33))
+        if self._to_time_returns_datetime():
+            self._test_func(F.toTime(dt), datetime(1970, 1, 2, 11, 22, 33))
         # Naive values are wall-clock times in the server's timezone, aware values are absolute
         self._test_func(F.toUnixTimestamp(dt, "UTC"), int(self.database.server_timezone.localize(dt).timestamp()))
         self._test_func(F.toUnixTimestamp(dt_utc), 1546255353)
@@ -347,15 +352,16 @@ class FuncsTestCase(TestCaseWithData):
         self._test_func(F.toRelativeMinuteNum(dt), 25770922)
         self._test_func(F.toRelativeSecondNum(dt), 1546255353)
         self._test_func(F.toStartOfDay(dt), datetime(2018, 12, 31, 0, 0, 0))
-        self._test_func(F.toTime(dt, pytz.utc), datetime(1970, 1, 2, 11, 22, 33, tzinfo=pytz.utc))
-        self._test_func(
-            F.toTime(dt, "Europe/Athens"),
-            athens_tz.localize(datetime(1970, 1, 2, 13, 22, 33)),
-        )
-        self._test_func(
-            F.toTime(dt, athens_tz),
-            athens_tz.localize(datetime(1970, 1, 2, 13, 22, 33)),
-        )
+        if self._to_time_returns_datetime():
+            self._test_func(F.toTime(dt, pytz.utc), datetime(1970, 1, 2, 11, 22, 33, tzinfo=pytz.utc))
+            self._test_func(
+                F.toTime(dt, "Europe/Athens"),
+                athens_tz.localize(datetime(1970, 1, 2, 13, 22, 33)),
+            )
+            self._test_func(
+                F.toTime(dt, athens_tz),
+                athens_tz.localize(datetime(1970, 1, 2, 13, 22, 33)),
+            )
         self._test_func(
             F.toTimeZone(dt, "Europe/Athens"),
             athens_tz.localize(datetime(2018, 12, 31, 13, 22, 33)),

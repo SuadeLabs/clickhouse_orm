@@ -40,6 +40,7 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ["3.11", "3.12", "3.14", "pypy3.11"]
+        clickhouse-version: ["25.8", "26.8"]
 
     steps:
     - uses: actions/checkout@v6
@@ -49,7 +50,7 @@ jobs:
       run: |
         docker run -d --rm --name ch -p 8123:8123 -p 9000:9000 -e CLICKHOUSE_SKIP_USER_SETUP=1 \
           -v "$GITHUB_WORKSPACE/tests/remote-servers.xml:/etc/clickhouse-server/config.d/remote_servers.xml:ro" \
-          clickhouse/clickhouse-server:25.8
+          clickhouse/clickhouse-server:${{ matrix.clickhouse-version }}
     - name: Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@v6
       with:
@@ -70,33 +71,6 @@ jobs:
     services:
       clickhouse:
         image: yandex/clickhouse-server:21.3
-        ports:
-          - 8123:8123
-          - 9000:9000
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ["3.11"]
-
-    steps:
-    - uses: actions/checkout@v6
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v6
-      with:
-        python-version: ${{ matrix.python-version }}
-    - name: Install dependencies
-      run: |
-        python -m pip install -e .[dev]
-    - name: Test with pytest
-      run: |
-        pytest .
-
-  test_compat_20_8:
-    # Tests compatibility with an older LTS release of clickhouse
-    runs-on: ubuntu-latest
-    services:
-      clickhouse:
-        image: yandex/clickhouse-server:20.8
         ports:
           - 8123:8123
           - 9000:9000

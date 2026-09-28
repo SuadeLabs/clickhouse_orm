@@ -36,6 +36,11 @@ Unreleased
   install with `pip install clickhouse_orm[native]`
 - `scripts/benchmark.py` compares the drivers for bulk inserts and selects (results under "Performance" in the docs)
 - The test suite can be run against the native driver with `pytest --driver=native`
+- CI tests against ClickHouse 21.3, 25.8 and 26.8 (20.8 is no longer tested). Locally, the version of the temporary
+  test container can be chosen with `CLICKHOUSE_VERSION` (default 25.8)
+- `Model.create_ad_hoc_field` raises `NotImplementedError` for multidimensional arrays (e.g. `Array(Array(String))`
+  or `Array(Tuple(...))`) rather than failing an assertion, so `get_model_for_table` reports them like other
+  unsupported types
 - bugfix: deep-copying a `QuerySet` (e.g. when used as a subquery filter) no longer copies its database
 - bugfix: `select_rows` array elements are now typed like `clickhouse_driver` (e.g. enum names, naive datetimes)
 - bugfix: arrays of `Nullable` fields containing `None` could not be inserted or read (NULLs inside arrays are now

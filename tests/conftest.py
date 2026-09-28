@@ -17,6 +17,9 @@ _HERE = pathlib.Path(__file__).parent.resolve()
 #: The address of the server's native protocol, for tests of `NativeDriver`
 NATIVE_URL_ENV = "CLICKHOUSE_NATIVE_URL"
 
+#: The ClickHouse version of the temporary docker container started when no server is running
+CLICKHOUSE_VERSION = os.environ.get("CLICKHOUSE_VERSION", "25.8")
+
 
 def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption(
@@ -97,9 +100,10 @@ def setup_local_db(request: pytest.FixtureRequest) -> Database:
 def start_db_container(client: docker.APIClient, container_name: str) -> Database:
     """Start a docker database container running Clickhouse."""
     print("Starting Clickhouse container...")
-    client.pull("clickhouse/clickhouse-server:25.8")
+    image = f"clickhouse/clickhouse-server:{CLICKHOUSE_VERSION}"
+    client.pull(image)
     container = client.create_container(
-        "clickhouse/clickhouse-server:25.8",
+        image,
         name=container_name,
         detach=True,
         ports={"8123/tcp": {}, "9000/tcp": {}},
