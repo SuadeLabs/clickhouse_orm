@@ -39,6 +39,11 @@ Unreleased
 - The test suite can be run against the native driver with `pytest --driver=native`
 - bugfix: deep-copying a `QuerySet` (e.g. when used as a subquery filter) no longer copies its database
 - bugfix: `select_rows` array elements are now typed like `clickhouse_driver` (e.g. enum names, naive datetimes)
+- bugfix: arrays of `Nullable` fields containing `None` could not be inserted or read (NULLs inside arrays are now
+  written as the `NULL` keyword, in TSV and SQL alike)
+- bugfix: array elements containing quotes or backslashes were corrupted when read, since the TSV codec unescaped
+  array cells which ClickHouse does not escape for TSV. `parse_array` now unescapes quoted elements, and returns
+  `None` for `NULL`. `select_rows` returns `Tuple` / `Map` text exactly as ClickHouse writes it
 
 **Deprecations / backwards incompatible changes**
 

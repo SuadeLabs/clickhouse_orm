@@ -145,7 +145,7 @@ class TSVCodec(Codec):
     def decode_rows(self, response, timezone=pytz.utc):
         lines = response.iter_lines()
         columns = list(zip(parse_tsv(next(lines)), parse_tsv(next(lines))))
-        converters = [_row_converter(db_type, timezone) for _, db_type in columns]
+        converters = [(_row_converter(db_type, timezone), _is_quoted_type(db_type)) for _, db_type in columns]
         return RowResult(columns, self._iter_rows(lines, converters))
 
     @staticmethod
@@ -154,13 +154,14 @@ class TSVCodec(Codec):
             # skip blank line left by WITH TOTALS modifier
             if line:
                 yield tuple(
-                    None if value == b"\\N" else convert(codecs.escape_decode(value)[0])
-                    for convert, value in zip(converters, line.split(b"\t"))
+                    None if value == b"\\N" else convert(value if quoted else codecs.escape_decode(value)[0])
+                    for (convert, quoted), value in zip(converters, line.split(b"\t"))
                 )
 
 
 # Types the ORM cannot parse yet are returned as their ClickHouse text representation
 _TEXT_TYPE_PREFIXES = ("Tuple(", "Map(", "Nested(", "Variant(", "Dynamic", "JSON", "Object(", "AggregateFunction(")
+_QUOTED_TYPE_PREFIXES = ("Array(", "Tuple(", "Map(", "Nested(")
 _BIG_INT_TYPES = frozenset(["Int128", "UInt128", "Int256", "UInt256"])
 
 
@@ -191,8 +192,21 @@ def _split_type_args(args: str) -> list[str]:
     return parts
 
 
+def _is_quoted_type(db_type: str) -> bool:
+    """
+    Whether TSV cells of `db_type` are written in the quoted text format, without escaping them for TSV: this is
+    the case for composite types such as arrays, whose elements are quoted and escaped as in SQL.
+    """
+    if db_type.startswith("SimpleAggregateFunction("):
+        return _is_quoted_type(_split_type_args(db_type[24:-1])[1])
+    return db_type.startswith(_QUOTED_TYPE_PREFIXES)
+
+
 def _row_converter(db_type: str, timezone: datetime.tzinfo) -> Callable[[bytes], Any]:
-    """Returns a function converting an unescaped, non-NULL TSV value of `db_type` to its Python value."""
+    """
+    Returns a function converting a non-NULL TSV value of `db_type` to its Python value. The value must be
+    unescaped, unless it is written in the quoted text format (see `_is_quoted_type`).
+    """
     for wrapper in ("Nullable(", "LowCardinality("):
         if db_type.startswith(wrapper):
             return _row_converter(db_type[len(wrapper) : -1], timezone)
@@ -219,10 +233,7 @@ def _row_converter(db_type: str, timezone: datetime.tzinfo) -> Callable[[bytes],
         # Convert the elements like values of the inner type (e.g. enums to names and datetimes to naive datetimes)
         inner_type = db_type[len("Array(") : -1]
         convert = _row_converter(inner_type, timezone)
-        nullable = field.inner_field._is_nullable()
-        return lambda value: [
-            None if nullable and item == "NULL" else convert(item.encode()) for item in parse_array(value.decode())
-        ]
+        return lambda value: [None if item is None else convert(item.encode()) for item in parse_array(value.decode())]
     if isinstance(field, BaseEnumField):
         return lambda value: field.to_python(value.decode(), timezone).name
     if isinstance(field, DateTimeField):

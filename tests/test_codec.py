@@ -145,6 +145,20 @@ class TSVCodecRowsTestCase(unittest.TestCase):
         self.assertEqual(nullables, [1, None])
         self.assertEqual(strings, ["x", "y z"])
 
+    def test_quoted_array_elements(self):
+        # Arrays, tuples and maps are written in the quoted format, and are not escaped for TSV
+        lines = [
+            b"s\tn\tt\tagg",
+            b"Array(Nullable(String))\tArray(Nullable(UInt8))\tTuple(String, String)\t"
+            b"SimpleAggregateFunction(groupArrayArray, Array(String))",
+            b"['a\\'b','\\\\','NULL',NULL,'\\t']\t[NULL]\t('a\\'b','c\\\\d')\t['\\\\']",
+        ]
+        ((strings, nulls, pair, agg),) = TSVCodec().decode_rows(_response(lines), self.tz)
+        self.assertEqual(strings, ["a'b", "\\", "NULL", None, "\t"])
+        self.assertEqual(nulls, [None])
+        self.assertEqual(pair, "('a\\'b','c\\\\d')")
+        self.assertEqual(agg, ["\\"])
+
     def test_explicit_timezone_column(self):
         lines = [b"dt", b"DateTime(\\'Asia/Tokyo\\')", b"2020-01-01 12:00:00"]
         ((value,),) = TSVCodec().decode_rows(_response(lines))

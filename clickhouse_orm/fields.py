@@ -550,11 +550,8 @@ class ArrayField(Field):
             self.inner_field.validate(v)
 
     def to_db_string(self, value, quote=True):
-        array = [self.inner_field.to_db_string(v, quote=True) for v in value]
-        return "[" + comma_join(array) + "]"
-
-    def _param_text(self, value):
-        # Inside arrays, parameters only accept the NULL keyword (not \N)
+        # The same text is used in SQL, TSV and query parameters: elements are always quoted, since arrays are not
+        # escaped for TSV, and NULLs are written as the NULL keyword (rather than \N)
         items = [self.inner_field.to_db_string(v, quote=True) for v in value]
         return "[" + comma_join("NULL" if item == "\\N" else item for item in items) + "]"
 

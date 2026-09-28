@@ -9,10 +9,10 @@ import pytz
 
 from .compiler import qualified_name, resolve_ddl_target
 from .engines import Distributed, Merge
-from .fields import Field, StringField
+from .fields import ArrayField, Field, StringField
 from .funcs import F
 from .query import QuerySet
-from .utils import NO_VALUE, arg_to_sql, get_subclass_names, parse_tsv
+from .utils import NO_VALUE, arg_to_sql, get_subclass_names, split_tsv, unescape
 
 logger = getLogger("clickhouse_orm")
 
@@ -402,12 +402,14 @@ class Model(metaclass=ModelBase):
         - `timezone_in_use`: the timezone to use when parsing dates and datetimes. Some fields use their own timezones.
         - `database`: if given, sets the database that this instance belongs to.
         """
-        values = iter(parse_tsv(line))
+        values = iter(split_tsv(line))
         kwargs = {}
         for name in field_names:
             field = getattr(cls, name)
             field_timezone = getattr(field, "timezone", None) or timezone_in_use
-            kwargs[name] = field.to_python(next(values), field_timezone)
+            # Arrays are written in their quoted form, which parse_array unescapes, rather than escaped for TSV
+            value = next(values)
+            kwargs[name] = field.to_python(value if isinstance(field, ArrayField) else unescape(value), field_timezone)
 
         obj = cls(**kwargs)
         if database is not None:

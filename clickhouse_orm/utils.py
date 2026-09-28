@@ -86,46 +86,52 @@ def arg_to_sql(arg: Any) -> str:
     return str(arg)
 
 
-def parse_tsv(line: bytes | str) -> list[str]:
+def split_tsv(line: bytes | str) -> list[str]:
+    """Splits a TSV line into its cells, without unescaping them."""
     if isinstance(line, bytes):
         line = line.decode()
     if line and line[-1] == "\n":
         line = line[:-1]
-    return [unescape(value) for value in line.split("\t")]
+    return line.split("\t")
+
+
+def parse_tsv(line: bytes | str) -> list[str]:
+    """Splits a TSV line into its unescaped cells."""
+    return [unescape(value) for value in split_tsv(line)]
+
+
+# An array item: a quoted string (group 1) or an unquoted value (group 2), followed by a comma or the end (group 3)
+_ARRAY_ITEM = re.compile(r"\s*(?:'((?:[^'\\]|\\.)*)'|([^,']*?))\s*(,|$)", re.DOTALL)
 
 
 def parse_array(array_string: str) -> list[Any]:
     """
     Parse an array or tuple string as returned by clickhouse. For example:
         "['hello', 'world']" ==> ["hello", "world"]
-        "(1,2,3)"            ==> [1, 2, 3]
+        "(1,2,3)"            ==> ["1", "2", "3"]
+        "[1,NULL]"           ==> ["1", None]
+
+    Quoted values are unescaped. The string must be in ClickHouse's quoted text format, as in SQL and in
+    the TSV cells of arrays (which, unlike other cells, are not escaped for TSV).
     """
-    # Sanity check
     if len(array_string) < 2 or array_string[0] not in "[(" or array_string[-1] not in "])":
         raise ValueError('Invalid array string: "%s"' % array_string)
-    # Drop opening brace
-    array_string = array_string[1:]
-    # Go over the string, lopping off each value at the beginning until nothing is left
-    values = []
+    values: list[Any] = []
+    pos, end = 1, len(array_string) - 1
+    if not array_string[pos:end].strip():
+        return values
     while True:
-        if array_string in "])":
-            # End of array
-            return values
-        elif array_string[0] in ", ":
-            # In between values
-            array_string = array_string[1:]
-        elif array_string[0] == "'":
-            # Start of quoted value, find its end
-            match = re.search(r"[^\\]'", array_string)
-            if match is None:
-                raise ValueError('Missing closing quote: "%s"' % array_string)
-            values.append(array_string[1 : match.start() + 1])
-            array_string = array_string[match.end() :]
+        match = _ARRAY_ITEM.match(array_string, pos, end)
+        if match is None or (match.group(1) is None and not match.group(2)):
+            raise ValueError('Invalid array string: "%s"' % array_string)
+        quoted, unquoted, separator = match.groups()
+        if quoted is not None:
+            values.append(codecs.escape_decode(quoted.encode("utf-8"))[0].decode("utf-8"))
         else:
-            # Start of non-quoted value, find its end
-            match = re.search(r",|\]", array_string)
-            values.append(array_string[0 : match.start()])
-            array_string = array_string[match.end() - 1 :]
+            values.append(None if unquoted == "NULL" else unquoted)
+        if not separator:
+            return values
+        pos = match.end()
 
 
 def import_submodules(package_name: str) -> dict[str, ModuleType]:

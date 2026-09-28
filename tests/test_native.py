@@ -97,6 +97,8 @@ class AllTypes(Model):
     nullable_dt = NullableField(DateTimeField())
     datetimes = ArrayField(DateTimeField())
     floats = ArrayField(Float32Field())
+    strings = ArrayField(StringField())
+    nullable_floats = ArrayField(NullableField(Float32Field()))
     flag = BooleanField()
 
     engine = Memory()
@@ -127,6 +129,8 @@ def _all_types_instances():
             nullable_dt=moment,
             datetimes=[moment, moment + datetime.timedelta(days=1)],
             floats=[0.1, 2.5],
+            strings=["a'b", "back\\slash\\", "\\'", "tab\t", "NULL", "", "[', ']"],
+            nullable_floats=[0.1, None],
             flag=True,
         ),
         AllTypes(id=2, nullable=0.3, flag=False),
