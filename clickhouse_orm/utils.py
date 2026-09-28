@@ -54,17 +54,21 @@ def arg_to_sql(arg: Any) -> str:
     None, numbers, timezones, arrays/iterables.
     """
     from clickhouse_orm import DateTimeField, F, Field, QuerySet, StringField
+    from clickhouse_orm.params import active_params
 
     if isinstance(arg, F):
         return arg.to_sql()
     if isinstance(arg, Field):
         return "`%s`" % arg
+    # Inside a `collect_params()` block, strings, dates and datetimes are bound as query parameters
+    params = active_params()
     if isinstance(arg, str):
-        return StringField().to_db_string(arg)
+        return params.bind(escape(arg, quote=False), "String") if params else StringField().to_db_string(arg)
     if isinstance(arg, datetime):
-        return "toDateTime(%s)" % DateTimeField().to_db_string(arg)
+        timestamp = DateTimeField().to_db_string(arg, quote=False)
+        return params.bind(timestamp, "DateTime") if params else "toDateTime('%s')" % timestamp
     if isinstance(arg, date):
-        return "toDate('%s')" % arg.isoformat()
+        return params.bind(arg.isoformat(), "Date") if params else "toDate('%s')" % arg.isoformat()
     if isinstance(arg, timedelta):
         return "toIntervalSecond(%d)" % int(arg.total_seconds())
     if isinstance(arg, bool):

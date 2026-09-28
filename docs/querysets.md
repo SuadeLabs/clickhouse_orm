@@ -270,6 +270,35 @@ values aggregated for all rows suitable for filters.
     'Alexandra': 2
     '': 100
 
+Parameterized Querysets
+-----------------------
+
+By default, filter values are formatted into the generated SQL (with proper escaping). Calling `parameterized()`
+returns a queryset which sends them as query parameters instead:
+
+    qs = Person.objects_in(database).filter(first_name=name, height__gt=1.8).parameterized()
+    >>> sql, params = qs.as_sql_with_params()
+    >>> print(sql)
+    SELECT ...
+    FROM `person`
+    WHERE (first_name = {_orm_p0:String}) AND (height > {_orm_p1:Float32})
+
+Iterating, counting, `paginate`, `delete` and `update` on the queryset then pass the parameters to the database.
+`as_sql()` and `str(qs)` still return SQL with the values inlined, which is useful for logging.
+
+What is parameterized:
+
+- Values in filter conditions (`first_name=...`, `height__gt=...`, `__in` lists, `__between`, `__contains` and the
+  other `LIKE` operators, `__iexact`). Parameters are typed like the field, so e.g. a `Float32Field` is compared with
+  a `Float32` value. Note that inlined float literals are `Float64`, so filters on `Float32` fields can match
+  slightly differently in the two modes (the parameterized comparison is exact at the column's precision).
+- String, date and datetime arguments of functions (`F.equals(Person.first_name, name)`,
+  `Person.birthday > date(2000, 1, 1)`, values passed to `update()`).
+- Subqueries used by the queryset (e.g. `first_name__in=other_qs`).
+
+Numbers, booleans, `None` (which still produces `IS NULL`), timezones and raw SQL strings (e.g. `first_name__in="..."`)
+stay inline.
+
 Executors
 ---------
 

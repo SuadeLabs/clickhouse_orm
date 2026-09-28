@@ -18,24 +18,38 @@ class Executor(Protocol):
     Generated queries rely on the executor to:
 
     - substitute the `$db` placeholder with its database name (used by `delete` / `update`);
-    - resolve unqualified table names against that same database (used by `SELECT` queries).
+    - resolve unqualified table names against that same database (used by `SELECT` queries);
+    - send `params` (for `{name:Type}` placeholders) to the server. Querysets only pass `params` when
+      they are parameterized, so executors which don't support parameters can omit the argument.
     """
 
     def select(
-        self, query: str, model_class: type[Model] | None = None, settings: Mapping[str, object] | None = None
+        self,
+        query: str,
+        model_class: type[Model] | None = None,
+        settings: Mapping[str, object] | None = None,
+        params: Mapping[str, object] | None = None,
     ) -> Iterable[Model]:
         """
         Runs a query and returns its rows as instances of `model_class`, or of an ad-hoc model when it is `None`.
         """
         ...
 
-    def raw(self, query: str, settings: Mapping[str, object] | None = None, stream: bool = False) -> str:
+    def raw(
+        self,
+        query: str,
+        settings: Mapping[str, object] | None = None,
+        stream: bool = False,
+        params: Mapping[str, object] | None = None,
+    ) -> str:
         """
         Runs a query and returns its output as text.
         """
         ...
 
-    def count(self, model_class: type[Model], conditions: str | Q | None = None) -> int:
+    def count(
+        self, model_class: type[Model], conditions: str | Q | None = None, params: Mapping[str, object] | None = None
+    ) -> int:
         """
         Returns the number of rows in the model's table matching the optional `WHERE` conditions.
         """

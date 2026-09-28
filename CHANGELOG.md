@@ -22,6 +22,12 @@ Unreleased
 - `QuerySet` no longer depends on `Database`: it runs its SQL through any `Executor` (`clickhouse_orm.executor`), a
   protocol with `select`, `raw` and `count` which `Database` implements. `Model.objects_in` accepts any executor,
   so query building can be unit-tested without a server. `QuerySet._database` remains as an alias of `_executor`
+- Query parameters: `Database.select`, `select_rows`, `raw`, `count` and `paginate` accept `params` for ClickHouse's
+  `{name:Type}` placeholders; values are encoded by `clickhouse_orm.params.format_param` (or passed pre-encoded as
+  `EncodedParam`) and sent by the driver (`Driver.send(..., params=...)`, as `param_<name>` URL parameters over HTTP)
+- `QuerySet.parameterized()` binds filter values and string / date / datetime function arguments as query parameters
+  instead of inlining them; `QuerySet.as_sql_with_params()` returns the `(sql, params)` pair. Executors receive
+  `params` only from parameterized querysets
 - bugfix: `DateTimeField.to_python` ignored `timezone_in_use` for naive `datetime` / `date` values
 - New `Database.select_rows(query, settings=None)` returning a `RowResult` of plain tuples plus `(name, type)`
   column metadata, with values typed like `clickhouse_driver` (see "Reading Rows" in the docs)

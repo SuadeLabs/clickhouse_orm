@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+from contextlib import nullcontext
 from copy import copy, deepcopy
 from math import ceil
 
 import pytz
 
 from .engines import CollapsingMergeTree, ReplacingMergeTree
-from .utils import Page, arg_to_sql, comma_join, string_or_func
+from .params import active_params, collect_params
+from .utils import Page, arg_to_sql, comma_join, escape, string_or_func, unescape
 
 # TODO
 # - check that field names are valid
@@ -25,11 +27,19 @@ class Operator:
         raise NotImplementedError  # pragma: no cover
 
     def _value_to_sql(self, field, value, quote=True):
+        """
+        Converts a Python value to SQL. Inside a `collect_params()` block quoted values are bound
+        as query parameters, and a `{name:Type}` placeholder is returned instead.
+        """
         if isinstance(value, Cond):
             # This is an 'in-database' value, rather than a python one
             return value.to_sql()
 
-        return field.to_db_string(field.to_python(value, pytz.utc), quote)
+        value = field.to_python(value, pytz.utc)
+        params = active_params()
+        if params is not None and quote:
+            return params.bind_field_value(field, value)
+        return field.to_db_string(value, quote)
 
 
 class SimpleOperator(Operator):
@@ -82,6 +92,13 @@ class LikeOperator(Operator):
     def to_sql(self, model_cls, field_name, value):
         field = getattr(model_cls, field_name)
         value = self._value_to_sql(field, value, quote=False)
+        params = active_params()
+        if params is not None and value != "\\N":
+            text = unescape(value).replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            pattern = params.bind(escape(self._pattern.format(text), quote=False), "String")
+            if self._case_sensitive:
+                return "%s LIKE %s" % (field_name, pattern)
+            return "lowerUTF8(%s) LIKE lowerUTF8(%s)" % (field_name, pattern)
         value = value.replace("\\", "\\\\").replace("%", "\\\\%").replace("_", "\\\\_")
         pattern = self._pattern.format(value)
         if self._case_sensitive:
@@ -298,6 +315,8 @@ class QuerySet:
     (normally a `Database`).
     """
 
+    _parameterized = False
+
     def __init__(self, model_cls, executor):
         """
         Initializer. It is possible to create a queryset like this, but the standard
@@ -326,11 +345,20 @@ class QuerySet:
         # Backwards-compatible alias for the executor
         return self._executor
 
+    def _compiling(self):
+        """
+        Context for generating the SQL to execute: yields the `QueryParams` collecting the bound values
+        when the queryset is parameterized, or `None` when values are inlined.
+        """
+        return collect_params() if self._parameterized else nullcontext()
+
     def __iter__(self):
         """
         Iterates over the model instances matching this queryset
         """
-        return self._executor.select(self.as_sql(), self._model_cls)
+        with self._compiling() as params:
+            sql = self.as_sql()
+        return self._executor.select(sql, self._model_cls, **_params_kwargs(params))
 
     def __bool__(self):
         """
@@ -388,9 +416,29 @@ class QuerySet:
             fields = comma_join("`%s`" % field for field in self._fields)
         return fields
 
+    def parameterized(self, enabled=True):
+        """
+        Returns a copy of this queryset which sends filter values and function arguments to the server as
+        query parameters (`{name:Type}` placeholders) rather than inlining them into the SQL.
+        This also applies to any subquery used by the queryset.
+        """
+        qs = copy(self)
+        qs._parameterized = enabled
+        return qs
+
+    def as_sql_with_params(self):
+        """
+        Returns the whole query as a `(sql, params)` pair, where values are bound as query parameters.
+        `params` maps parameter names to `EncodedParam` values, as accepted by `Database.select`.
+        """
+        with collect_params() as params:
+            sql = self.as_sql()
+        return sql, params.values
+
     def as_sql(self):
         """
-        Returns the whole query as a SQL string.
+        Returns the whole query as a SQL string, with all values inlined
+        (unless called while compiling a parameterized query).
         """
         distinct = "DISTINCT " if self._distinct else ""
         final = " FINAL" if self._final else ""
@@ -446,15 +494,16 @@ class QuerySet:
         """
         Returns the number of matching model instances.
         """
+        with self._compiling() as params:
+            if self._distinct or self._limits:
+                # Use a subquery, since a simple count won't be accurate
+                sql = "SELECT count() FROM (%s)" % self.as_sql()
+            else:
+                conditions = (self._where_q & self._prewhere_q).to_sql(self._model_cls)
         if self._distinct or self._limits:
-            # Use a subquery, since a simple count won't be accurate
-            sql = "SELECT count() FROM (%s)" % self.as_sql()
-            raw = self._executor.raw(sql)
+            raw = self._executor.raw(sql, **_params_kwargs(params))
             return int(raw) if raw else 0
-
-        # Simple case
-        conditions = (self._where_q & self._prewhere_q).to_sql(self._model_cls)
-        return self._executor.count(self._model_cls, conditions)
+        return self._executor.count(self._model_cls, conditions, **_params_kwargs(params))
 
     def order_by(self, *field_names):
         """
@@ -573,9 +622,10 @@ class QuerySet:
         Note that ClickHouse performs deletions in the background, so they are not immediate.
         """
         self._verify_mutation_allowed()
-        conditions = (self._where_q & self._prewhere_q).to_sql(self._model_cls)
+        with self._compiling() as params:
+            conditions = (self._where_q & self._prewhere_q).to_sql(self._model_cls)
         sql = "ALTER TABLE $db.`%s` DELETE WHERE %s" % (self._model_cls.table_name(), conditions)
-        self._executor.raw(sql)
+        self._executor.raw(sql, **_params_kwargs(params))
         return self
 
     def update(self, **kwargs):
@@ -586,10 +636,11 @@ class QuerySet:
         """
         assert kwargs, "No fields specified for update"
         self._verify_mutation_allowed()
-        fields = comma_join("`%s` = %s" % (name, arg_to_sql(expr)) for name, expr in kwargs.items())
-        conditions = (self._where_q & self._prewhere_q).to_sql(self._model_cls)
+        with self._compiling() as params:
+            fields = comma_join("`%s` = %s" % (name, arg_to_sql(expr)) for name, expr in kwargs.items())
+            conditions = (self._where_q & self._prewhere_q).to_sql(self._model_cls)
         sql = "ALTER TABLE $db.`%s` UPDATE %s WHERE %s" % (self._model_cls.table_name(), fields, conditions)
-        self._executor.raw(sql)
+        self._executor.raw(sql, **_params_kwargs(params))
         return self
 
     def _verify_mutation_allowed(self):
@@ -648,6 +699,7 @@ class AggregateQuerySet(QuerySet):
         self._prewhere_q = base_qs._prewhere_q
         self._limits = base_qs._limits
         self._distinct = base_qs._distinct
+        self._parameterized = base_qs._parameterized
 
     def group_by(self, *args):
         """
@@ -684,14 +736,17 @@ class AggregateQuerySet(QuerySet):
         )
 
     def __iter__(self):
-        return self._executor.select(self.as_sql())  # using an ad-hoc model
+        with self._compiling() as params:
+            sql = self.as_sql()
+        return self._executor.select(sql, **_params_kwargs(params))  # using an ad-hoc model
 
     def count(self):
         """
         Returns the number of rows after aggregation.
         """
-        sql = "SELECT count() FROM (%s)" % self.as_sql()
-        raw = self._executor.raw(sql)
+        with self._compiling() as params:
+            sql = "SELECT count() FROM (%s)" % self.as_sql()
+        raw = self._executor.raw(sql, **_params_kwargs(params))
         return int(raw) if raw else 0
 
     def with_totals(self):
@@ -706,6 +761,11 @@ class AggregateQuerySet(QuerySet):
 
     def _verify_mutation_allowed(self):
         raise AssertionError("Cannot mutate an AggregateQuerySet")
+
+
+def _params_kwargs(params):
+    # Executors are only passed `params` for parameterized querysets
+    return {} if params is None else {"params": params.values}
 
 
 # Expose only relevant classes in import *

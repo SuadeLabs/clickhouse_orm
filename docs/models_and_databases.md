@@ -239,6 +239,26 @@ you can use:
 
 Note: normally it is not necessary to specify the database name, since it's already sent in the query parameters to ClickHouse. It is enough to specify the table name.
 
+Query Parameters
+----------------
+
+Rather than formatting values into the SQL, you can use ClickHouse's `{name:Type}` placeholders and pass the values
+separately with `params`. The values are sent to the server alongside the query and are never parsed as SQL, which
+makes this the safe way to use values from untrusted sources. `select`, `select_rows`, `raw`, `count` and
+`paginate` all accept `params`:
+
+    db.select("SELECT * FROM $table WHERE first_name = {name:String} AND height > {height:Float32}",
+              model_class=Person, params={"name": name, "height": 1.8})
+    db.count(Person, conditions="birthday >= {since:Date}", params={"since": date(2000, 1, 1)})
+
+Supported values are `None` (for `Nullable` types), strings, booleans, numbers, `Decimal`, dates, datetimes (naive
+ones are treated as UTC, as elsewhere in the ORM), UUIDs, IP addresses, enums (sent by name), lists (arrays),
+tuples and dicts (maps). A datetime with microseconds can only be passed to a `DateTime64` placeholder. For other
+types, pass an `EncodedParam` holding text in ClickHouse's escaped format, e.g. `EncodedParam.for_field(field, value)`
+to encode a value exactly like a model field does.
+
+Querysets can bind their values as parameters too; see [Parameterized Querysets](querysets.md#parameterized-querysets).
+
 Counting
 --------
 

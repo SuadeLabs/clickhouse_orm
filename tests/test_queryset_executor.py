@@ -19,16 +19,20 @@ class StubExecutor:
         self.raw_result = raw_result
         self.count_result = count_result
         self.calls = []
+        self.params = []
 
-    def select(self, query, model_class=None, settings=None):
+    def select(self, query, model_class=None, settings=None, params=None):
+        self.params.append(params)
         self.calls.append(("select", query, model_class))
         return iter(self.rows)
 
-    def raw(self, query, settings=None, stream=False):
+    def raw(self, query, settings=None, stream=False, params=None):
+        self.params.append(params)
         self.calls.append(("raw", query))
         return self.raw_result
 
-    def count(self, model_class, conditions=None):
+    def count(self, model_class, conditions=None, params=None):
+        self.params.append(params)
         self.calls.append(("count", model_class, conditions))
         return self.count_result
 

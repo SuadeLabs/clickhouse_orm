@@ -12,6 +12,7 @@ from .compiler import ServerCapabilities, qualified_name, quote_identifier, subs
 from .driver import Driver, RequestsDriver
 from .exceptions import DatabaseException, ServerError
 from .models import ModelBase
+from .params import encode_params
 from .utils import Page, import_submodules
 
 logger = logging.getLogger("clickhouse_orm")
@@ -183,12 +184,13 @@ class Database:
         instances = self._attach(chain([first_instance], i))
         self._send(query, data=self.codec.encode(model_class, instances, batch_size))
 
-    def count(self, model_class, conditions=None):
+    def count(self, model_class, conditions=None, params=None):
         """
         Counts the number of records in the model's table.
 
         - `model_class`: the model to count.
         - `conditions`: optional SQL conditions (contents of the WHERE clause).
+        - `params`: values for `{name:Type}` placeholders in the conditions.
         """
         from clickhouse_orm.query import Q
 
@@ -198,10 +200,10 @@ class Database:
                 conditions = conditions.to_sql(model_class)
             query += " WHERE " + str(conditions)
         query = self._substitute(query, model_class)
-        result = self._scalar(query)
+        result = self._scalar(query, params=params)
         return int(result) if result else 0
 
-    def select(self, query, model_class=None, settings=None):
+    def select(self, query, model_class=None, settings=None, params=None):
         """
         Performs a query and returns a generator of model instances.
 
@@ -209,13 +211,14 @@ class Database:
         - `model_class`: the model class matching the query's table,
           or `None` for getting back instances of an ad-hoc model.
         - `settings`: query settings to send as HTTP GET parameters
+        - `params`: values for `{name:Type}` placeholders in the query (see "Query Parameters")
         """
         query += " FORMAT " + self.codec.select_format
         query = self._substitute(query, model_class)
-        r = self._send(query, settings=settings, stream=True)
+        r = self._send(query, settings=settings, stream=True, params=params)
         yield from self._attach(self.codec.decode(r.iter_lines(), model_class, self.server_timezone))
 
-    def select_rows(self, query, settings=None):
+    def select_rows(self, query, settings=None, params=None):
         """
         Performs a query and returns a `RowResult`: its `columns` attribute lists the `(name, type)`
         of each column, and iterating over it yields each row as a plain tuple.
@@ -227,24 +230,26 @@ class Database:
 
         - `query`: the SQL query to execute.
         - `settings`: query settings to send as HTTP GET parameters
+        - `params`: values for `{name:Type}` placeholders in the query
         """
         query += " FORMAT " + self.codec.select_format
         query = self._substitute(query, None)
-        r = self._send(query, settings=settings, stream=True)
+        r = self._send(query, settings=settings, stream=True, params=params)
         return self.codec.decode_rows(r.iter_lines(), self.server_timezone)
 
-    def raw(self, query, settings=None, stream=False):
+    def raw(self, query, settings=None, stream=False, params=None):
         """
         Performs a query and returns its output as text.
 
         - `query`: the SQL query to execute.
         - `settings`: query settings to send as HTTP GET parameters
         - `stream`: if true, the HTTP response from ClickHouse will be streamed.
+        - `params`: values for `{name:Type}` placeholders in the query
         """
         query = self._substitute(query, None)
-        return self._send(query, settings=settings, stream=stream).text
+        return self._send(query, settings=settings, stream=stream, params=params).text
 
-    def paginate(self, model_class, order_by, page_num=1, page_size=100, conditions=None, settings=None):
+    def paginate(self, model_class, order_by, page_num=1, page_size=100, conditions=None, settings=None, params=None):
         """
         Selects records and returns a single page of model instances.
 
@@ -255,13 +260,14 @@ class Database:
         - `page_size`: number of records to return per page.
         - `conditions`: optional SQL conditions (contents of the WHERE clause).
         - `settings`: query settings to send as HTTP GET parameters
+        - `params`: values for `{name:Type}` placeholders in the conditions
 
         The result is a namedtuple containing `objects` (list), `number_of_objects`,
         `pages_total`, `number` (of the current page), and `page_size`.
         """
         from clickhouse_orm.query import Q
 
-        count = self.count(model_class, conditions)
+        count = self.count(model_class, conditions, params=params)
         pages_total = int(ceil(count / float(page_size)))
         if page_num == -1:
             page_num = max(pages_total, 1)
@@ -277,7 +283,7 @@ class Database:
         query += " LIMIT %d, %d" % (offset, page_size)
         query = self._substitute(query, model_class)
         return Page(
-            objects=list(self.select(query, model_class, settings)) if count else [],
+            objects=list(self.select(query, model_class, settings, params=params)) if count else [],
             number_of_objects=count,
             pages_total=pages_total,
             number=page_num,
@@ -331,15 +337,21 @@ class Database:
             instance.set_database(self)
             yield instance
 
-    def _send(self, query, data=None, settings=None, stream=False):
-        if self.log_statements:
-            logger.info(query)
-        return self.driver.send(query, data=data, settings=self._build_params(settings), stream=stream)
+    def _send(self, query, data=None, settings=None, stream=False, params=None):
+        params = self._encode_params(query, params)
+        return self.driver.send(query, data=data, settings=self._build_params(settings), stream=stream, params=params)
 
-    def _scalar(self, query, settings=None):
+    def _scalar(self, query, settings=None, params=None):
+        params = self._encode_params(query, params)
+        return self.driver.scalar(query, settings=self._build_params(settings), params=params)
+
+    def _encode_params(self, query, params):
+        encoded = encode_params(params)
         if self.log_statements:
             logger.info(query)
-        return self.driver.scalar(query, settings=self._build_params(settings))
+            if encoded:
+                logger.info("params: %s", encoded)
+        return encoded
 
     def _build_params(self, settings):
         params = dict(settings or {})

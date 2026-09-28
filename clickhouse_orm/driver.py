@@ -36,6 +36,7 @@ class Driver(abc.ABC):
         data: InsertData | None = None,
         settings: Mapping[str, str] | None = None,
         stream: bool = False,
+        params: Mapping[str, str] | None = None,
     ) -> DriverResponse:
         """
         Sends a query to the ClickHouse server and returns the response.
@@ -43,15 +44,23 @@ class Driver(abc.ABC):
         - `query`: the SQL statement to execute.
         - `data`: optional payload for the statement (e.g. rows for an `INSERT ... FORMAT ...` query).
           May be an iterable of byte chunks for streaming large inserts.
-        - `settings`: query settings / parameters to send along with the query.
+        - `settings`: query settings to send along with the query.
         - `stream`: if true, the response body is streamed rather than read eagerly.
+        - `params`: values for the query's `{name:Type}` placeholders, already encoded in ClickHouse's
+          escaped text format (see `clickhouse_orm.params.format_param`).
 
         Raises `ServerError` if the server reports an error.
         """
 
-    def scalar(self, query: str, data: InsertData | None = None, settings: Mapping[str, str] | None = None) -> str:
+    def scalar(
+        self,
+        query: str,
+        data: InsertData | None = None,
+        settings: Mapping[str, str] | None = None,
+        params: Mapping[str, str] | None = None,
+    ) -> str:
         """Sends a query to the ClickHouse server and returns the response text, stripped of whitespace."""
-        return self.send(query, data=data, settings=settings).text.strip()
+        return self.send(query, data=data, settings=settings, params=params).text.strip()
 
 
 class RequestsDriver(Driver):
@@ -78,15 +87,18 @@ class RequestsDriver(Driver):
         data: InsertData | None = None,
         settings: Mapping[str, str] | None = None,
         stream: bool = False,
+        params: Mapping[str, str] | None = None,
     ) -> requests.Response:
-        params = dict(settings or {})
+        url_params = dict(settings or {})
+        for name, value in (params or {}).items():
+            url_params["param_" + name] = value
         if data is None:
             body = query.encode("utf-8")
         else:
             # The HTTP interface joins the `query` parameter and the request body with a newline
-            params["query"] = query.rstrip()
+            url_params["query"] = query.rstrip()
             body = data
-        r = self.session.post(self.url, params=params, data=body, stream=stream, timeout=self.timeout)
+        r = self.session.post(self.url, params=url_params, data=body, stream=stream, timeout=self.timeout)
         if r.status_code != 200:
             raise ServerError(r.text)
         return r

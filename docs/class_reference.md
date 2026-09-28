@@ -37,13 +37,14 @@ The name must be string, and the value is converted to string in case
 it isn't. To remove a setting, pass `None` as the value.
 
 
-#### count(model_class, conditions=None)
+#### count(model_class, conditions=None, params=None)
 
 
 Counts the number of records in the model's table.
 
 - `model_class`: the model to count.
 - `conditions`: optional SQL conditions (contents of the WHERE clause).
+- `params`: values for `{name:Type}` placeholders in the conditions.
 
 
 #### create_database()
@@ -107,7 +108,7 @@ Executes schema migrations.
 - `up_to` - number of the last migration to apply.
 
 
-#### paginate(model_class, order_by, page_num=1, page_size=100, conditions=None, settings=None)
+#### paginate(model_class, order_by, page_num=1, page_size=100, conditions=None, settings=None, params=None)
 
 
 Selects records and returns a single page of model instances.
@@ -119,12 +120,13 @@ Selects records and returns a single page of model instances.
 - `page_size`: number of records to return per page.
 - `conditions`: optional SQL conditions (contents of the WHERE clause).
 - `settings`: query settings to send as HTTP GET parameters
+- `params`: values for `{name:Type}` placeholders in the conditions
 
 The result is a namedtuple containing `objects` (list), `number_of_objects`,
 `pages_total`, `number` (of the current page), and `page_size`.
 
 
-#### raw(query, settings=None, stream=False)
+#### raw(query, settings=None, stream=False, params=None)
 
 
 Performs a query and returns its output as text.
@@ -132,9 +134,10 @@ Performs a query and returns its output as text.
 - `query`: the SQL query to execute.
 - `settings`: query settings to send as HTTP GET parameters
 - `stream`: if true, the HTTP response from ClickHouse will be streamed.
+- `params`: values for `{name:Type}` placeholders in the query
 
 
-#### select(query, model_class=None, settings=None)
+#### select(query, model_class=None, settings=None, params=None)
 
 
 Performs a query and returns a generator of model instances.
@@ -143,9 +146,10 @@ Performs a query and returns a generator of model instances.
 - `model_class`: the model class matching the query's table,
   or `None` for getting back instances of an ad-hoc model.
 - `settings`: query settings to send as HTTP GET parameters
+- `params`: values for `{name:Type}` placeholders in the query
 
 
-#### select_rows(query, settings=None)
+#### select_rows(query, settings=None, params=None)
 
 
 Performs a query and returns a `RowResult`: the `(name, type)` column metadata
@@ -153,6 +157,7 @@ plus a single-use iterator of plain tuples, typed like `clickhouse_driver` rows.
 
 - `query`: the SQL query to execute.
 - `settings`: query settings to send as HTTP GET parameters
+- `params`: values for `{name:Type}` placeholders in the query
 
 
 ### DatabaseException
@@ -1210,7 +1215,15 @@ is equivalent to:
 #### as_sql()
 
 
-Returns the whole query as a SQL string.
+Returns the whole query as a SQL string, with all values inlined
+(unless called while compiling a parameterized query).
+
+
+#### as_sql_with_params()
+
+
+Returns the whole query as a `(sql, params)` pair, where values are bound as query parameters.
+`params` maps parameter names to `EncodedParam` values, as accepted by `Database.select`.
 
 
 #### conditions_as_sql(prewhere=False)
@@ -1301,6 +1314,14 @@ partitioning of records into pages.
 The result is a namedtuple containing `objects` (list), `number_of_objects`,
 `pages_total`, `number` (of the current page), and `page_size`.
 
+
+
+#### parameterized(enabled=True)
+
+
+Returns a copy of this queryset which sends filter values and function arguments to the server as
+query parameters (`{name:Type}` placeholders) rather than inlining them into the SQL.
+This also applies to any subquery used by the queryset.
 
 #### select_fields_as_sql()
 

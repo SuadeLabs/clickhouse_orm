@@ -18,6 +18,7 @@
       * [Reading without a Model](models_and_databases.md#reading-without-a-model)
       * [Reading Rows](models_and_databases.md#reading-rows)
       * [SQL Placeholders](models_and_databases.md#sql-placeholders)
+      * [Query Parameters](models_and_databases.md#query-parameters)
       * [Counting](models_and_databases.md#counting)
       * [Pagination](models_and_databases.md#pagination)
 
@@ -36,6 +37,7 @@
       * [Mutations](querysets.md#mutations)
       * [Aggregation](querysets.md#aggregation)
          * [Adding totals](querysets.md#adding-totals)
+      * [Parameterized Querysets](querysets.md#parameterized-querysets)
       * [Executors](querysets.md#executors)
 
    * [Field Options](field_options.md#field-options)

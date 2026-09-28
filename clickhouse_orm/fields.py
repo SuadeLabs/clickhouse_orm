@@ -115,6 +115,17 @@ class Field(FunctionOperatorsMixin):
         """Returns field type arguments"""
         return []
 
+    def _param_type(self):
+        """The ClickHouse type used for query parameters holding a (non-NULL) value of this field."""
+        return self._get_sql(False, None)
+
+    def _is_nullable(self):
+        return False
+
+    def _param_text(self, value):
+        """Encodes a value (already converted by `to_python`) as the text of a query parameter."""
+        return self.to_db_string(value, quote=False)
+
     def _extra_params(self, capabilities):
         sql = ""
         if self.alias:
@@ -542,6 +553,17 @@ class ArrayField(Field):
         array = [self.inner_field.to_db_string(v, quote=True) for v in value]
         return "[" + comma_join(array) + "]"
 
+    def _param_text(self, value):
+        # Inside arrays, parameters only accept the NULL keyword (not \N)
+        items = [self.inner_field.to_db_string(v, quote=True) for v in value]
+        return "[" + comma_join("NULL" if item == "\\N" else item for item in items) + "]"
+
+    def _param_type(self):
+        inner_type = self.inner_field._param_type()
+        if self.inner_field._is_nullable():
+            inner_type = "Nullable(%s)" % inner_type
+        return "Array(%s)" % inner_type
+
     def _get_sql(self, with_default_expression, capabilities):
         sql = "Array(%s)" % self.inner_field._get_sql(False, capabilities)
         if with_default_expression and self.codec and capabilities and capabilities.has_codec_support:
@@ -629,6 +651,13 @@ class NullableField(Field):
             return "\\N"
         return self.inner_field.to_db_string(value, quote=quote)
 
+    def _is_nullable(self):
+        return True
+
+    def _param_type(self):
+        # NULL values are never bound as parameters, so the inner type suffices
+        return self.inner_field._param_type()
+
     def _get_sql(self, with_default_expression, capabilities):
         sql = "Nullable(%s)" % self.inner_field._get_sql(False, capabilities)
         if with_default_expression:
@@ -659,6 +688,12 @@ class LowCardinalityField(Field):
 
     def to_db_string(self, value, quote=True):
         return self.inner_field.to_db_string(value, quote=quote)
+
+    def _is_nullable(self):
+        return self.inner_field._is_nullable()
+
+    def _param_type(self):
+        return self.inner_field._param_type()
 
     def _get_sql(self, with_default_expression, capabilities):
         if capabilities and capabilities.has_low_cardinality_support:
