@@ -19,6 +19,9 @@ Unreleased
 - Serialisation moved into a pluggable `Codec` (`clickhouse_orm.codec`); `Database.codec` defaults to `TSVCodec`,
   which owns the wire formats, TSV header parsing and insert batching
 - `insert(batch_size=n)` now sends exactly `n` rows per chunk (previously the first chunk held one row fewer)
+- bugfix: `DateTimeField.to_python` ignored `timezone_in_use` for naive `datetime` / `date` values
+- New `Database.select_rows(query, settings=None)` returning a `RowResult` of plain tuples plus `(name, type)`
+  column metadata, with values typed like `clickhouse_driver` (see "Reading Rows" in the docs)
 
 **Deprecations / backwards incompatible changes**
 

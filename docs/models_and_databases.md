@@ -201,6 +201,29 @@ It is also possible to generate a model class on the fly for an existing table i
     for row in QueryLog.objects_in(db).filter(QueryLog.query_duration_ms > 10000):
         print(row.query)
 
+Reading Rows
+------------
+
+`select_rows` skips model construction entirely. It returns a `RowResult` which exposes the column metadata up
+front and yields one plain tuple per row, similar to `clickhouse_driver`'s `execute(..., with_column_types=True)`:
+
+    result = db.select_rows("SELECT first_name, count() FROM $db.person GROUP BY first_name")
+    print(result.columns)       # [('first_name', 'String'), ('count()', 'UInt64')]
+    print(result.column_names)  # ['first_name', 'count()']
+    for first_name, total in result:
+        print(first_name, total)
+
+Unlike `select`, the query is sent immediately, so server errors are raised by `select_rows` itself. Rows are
+streamed from the response and can only be iterated once. Duplicate column names (e.g. `SELECT 1, 1`) are preserved.
+
+Values use the same Python types as `clickhouse_driver`:
+
+- `DateTime` / `DateTime64` without an explicit timezone are naive datetimes in the server's timezone; columns with
+  an explicit timezone (e.g. `DateTime('UTC')`) are timezone-aware
+- `Enum` values are returned as their name (`str`), `Bool` as `bool`, `Nullable` NULLs as `None`
+- `FixedString` values have trailing null bytes removed; strings which are not valid UTF-8 are returned as `bytes`
+- Types which are not parsed yet (`Tuple`, `Map`, nested arrays, `JSON`, ...) are returned as their text representation
+
 SQL Placeholders
 ----------------
 

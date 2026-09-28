@@ -145,6 +145,16 @@ Performs a query and returns a generator of model instances.
 - `settings`: query settings to send as HTTP GET parameters
 
 
+#### select_rows(query, settings=None)
+
+
+Performs a query and returns a `RowResult`: the `(name, type)` column metadata
+plus a single-use iterator of plain tuples, typed like `clickhouse_driver` rows.
+
+- `query`: the SQL query to execute.
+- `settings`: query settings to send as HTTP GET parameters
+
+
 ### DatabaseException
 
 Extends Exception

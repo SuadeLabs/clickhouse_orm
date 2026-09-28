@@ -215,6 +215,24 @@ class Database:
         r = self._send(query, settings=settings, stream=True)
         yield from self._attach(self.codec.decode(r.iter_lines(), model_class, self.server_timezone))
 
+    def select_rows(self, query, settings=None):
+        """
+        Performs a query and returns a `RowResult`: its `columns` attribute lists the `(name, type)`
+        of each column, and iterating over it yields each row as a plain tuple.
+
+        Unlike `select`, no model instances are created. Values use the same Python types as
+        `clickhouse_driver` (e.g. `DateTime` columns without a timezone are naive datetimes in the
+        server's timezone, and enums are returned as their names). Rows are streamed from the server,
+        so the result can only be iterated once.
+
+        - `query`: the SQL query to execute.
+        - `settings`: query settings to send as HTTP GET parameters
+        """
+        query += " FORMAT " + self.codec.select_format
+        query = self._substitute(query, None)
+        r = self._send(query, settings=settings, stream=True)
+        return self.codec.decode_rows(r.iter_lines(), self.server_timezone)
+
     def raw(self, query, settings=None, stream=False):
         """
         Performs a query and returns its output as text.

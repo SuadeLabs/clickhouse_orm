@@ -16,6 +16,7 @@
       * [Inserting to the Database](models_and_databases.md#inserting-to-the-database)
       * [Reading from the Database](models_and_databases.md#reading-from-the-database)
       * [Reading without a Model](models_and_databases.md#reading-without-a-model)
+      * [Reading Rows](models_and_databases.md#reading-rows)
       * [SQL Placeholders](models_and_databases.md#sql-placeholders)
       * [Counting](models_and_databases.md#counting)
       * [Pagination](models_and_databases.md#pagination)

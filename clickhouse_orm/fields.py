@@ -222,10 +222,14 @@ class DateTimeField(Field):
         return args
 
     def to_python(self, value, timezone_in_use):
+        """
+        Naive values (datetimes, dates and ISO strings without an offset) are localized to `timezone_in_use`,
+        or left naive when it is `None`. Unix timestamps are always returned in UTC.
+        """
         if isinstance(value, datetime.datetime):
-            return value if value.tzinfo else value.replace(tzinfo=pytz.utc)
+            return self._localize(value, timezone_in_use)
         if isinstance(value, datetime.date):
-            return datetime.datetime(value.year, value.month, value.day, tzinfo=pytz.utc)
+            return self._localize(datetime.datetime(value.year, value.month, value.day), timezone_in_use)
         if isinstance(value, int):
             return datetime.datetime.utcfromtimestamp(value).replace(tzinfo=pytz.utc)
         if isinstance(value, str):
@@ -237,14 +241,14 @@ class DateTimeField(Field):
                     return datetime.datetime.utcfromtimestamp(value).replace(tzinfo=pytz.utc)
                 except ValueError:
                     pass
-            # left the date naive in case of no tzinfo set
-            dt = datetime.datetime.fromisoformat(value)
-
-            # convert naive to aware
-            if dt.tzinfo is None or dt.tzinfo.utcoffset(dt) is None:
-                dt = timezone_in_use.localize(dt)
-            return dt
+            return self._localize(datetime.datetime.fromisoformat(value), timezone_in_use)
         raise ValueError("Invalid value for %s - %r" % (self.__class__.__name__, value))
+
+    @staticmethod
+    def _localize(value, timezone_in_use):
+        if timezone_in_use is None or (value.tzinfo is not None and value.utcoffset() is not None):
+            return value
+        return timezone_in_use.localize(value.replace(tzinfo=None))
 
     def to_db_string(self, value, quote=True):
         return escape("%010d" % timegm(value.utctimetuple()), quote)

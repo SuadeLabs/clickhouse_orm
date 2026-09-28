@@ -80,6 +80,38 @@ class DateFieldsTest(unittest.TestCase):
         )
 
 
+class DateTimeToPythonTest(unittest.TestCase):
+    def setUp(self):
+        self.field = DateTimeField()
+        self.tz = pytz.timezone("Asia/Jerusalem")
+        self.naive = datetime.datetime(2020, 6, 11, 4, 0)
+
+    def test_naive_values_are_localized(self):
+        expected = self.tz.localize(self.naive)
+        for value in (self.naive, "2020-06-11 04:00:00"):
+            result = self.field.to_python(value, self.tz)
+            self.assertEqual(result, expected)
+            self.assertEqual(result.tzinfo.zone, "Asia/Jerusalem")
+        self.assertEqual(
+            self.field.to_python(datetime.date(2020, 6, 11), self.tz), self.tz.localize(datetime.datetime(2020, 6, 11))
+        )
+
+    def test_no_timezone_keeps_naive(self):
+        self.assertEqual(self.field.to_python(self.naive, None), self.naive)
+        self.assertEqual(self.field.to_python("2020-06-11 04:00:00", None), self.naive)
+
+    def test_absolute_values(self):
+        aware = pytz.utc.localize(self.naive)
+        self.assertIs(self.field.to_python(aware, self.tz), aware)
+        self.assertEqual(self.field.to_python(1591848000, self.tz), aware)
+        self.assertEqual(self.field.to_python("2020-06-11 07:00:00+03:00", None), aware)
+
+    def test_assignment_assumes_utc(self):
+        instance = ModelWithDate(datetime_field=self.naive, datetime64_field="2020-06-11")
+        self.assertEqual(instance.datetime_field, pytz.utc.localize(self.naive))
+        self.assertEqual(instance.datetime64_field, pytz.utc.localize(datetime.datetime(2020, 6, 11)))
+
+
 class ModelWithDate(Model):
     date_field = DateField()
     datetime_field = DateTimeField()
