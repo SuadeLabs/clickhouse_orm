@@ -23,6 +23,7 @@
       * [Pagination](models_and_databases.md#pagination)
       * [Drivers](models_and_databases.md#drivers)
          * [The native driver](models_and_databases.md#the-native-driver)
+         * [Performance](models_and_databases.md#performance)
          * [Custom drivers](models_and_databases.md#custom-drivers)
 
    * [Querysets](querysets.md#querysets)

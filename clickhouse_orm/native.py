@@ -45,6 +45,23 @@ _BUILTIN_FIELDS = frozenset(
 _WRAPPER_FIELDS = (orm_fields.NullableField, orm_fields.LowCardinalityField, orm_fields.ArrayField)
 
 
+class NativeInsertData:
+    """
+    The insert data produced by `NativeCodec`: an iterator over the rows (tuples of Python values), sent by
+    `NativeDriver` in blocks of `block_size` rows so that inserting from an iterator uses bounded memory.
+    """
+
+    def __init__(self, rows: Iterator[tuple], block_size: int):
+        self.rows = rows
+        self.block_size = block_size
+
+    def __iter__(self) -> NativeInsertData:
+        return self
+
+    def __next__(self) -> tuple:
+        return next(self.rows)
+
+
 class NativeResponse:
     """
     The response of `NativeDriver.send`: the result `columns` as `(name, type)` pairs, and the `rows` as tuples.
@@ -76,16 +93,16 @@ class NativeCodec(Codec):
     select_format = None
 
     def encode_inserts(self, model_class, instances, batch_size=1000):
-        # clickhouse_driver splits the rows into blocks by itself, so batch_size does not apply
         fields = model_class.fields(writable=True)
         encoders = {name: _value_encoder(field) for name, field in fields.items()}
         if not model_class.has_funcs_as_defaults():
-            yield self._statement(fields), self._rows(instances, list(encoders.items()))
+            yield self._statement(fields), NativeInsertData(self._rows(instances, list(encoders.items())), batch_size)
             return
         # Omit the fields without a value, so that ClickHouse evaluates their defaults. The fields must be the same
         # in all the rows of a statement, so consecutive instances with the same fields are grouped together.
         for names, group in groupby(instances, key=lambda instance: _assigned_fields(instance, fields)):
-            yield self._statement(names), self._rows(group, [(name, encoders[name]) for name in names])
+            rows = self._rows(group, [(name, encoders[name]) for name in names])
+            yield self._statement(names), NativeInsertData(rows, batch_size)
 
     @staticmethod
     def _statement(names: Iterable[str]) -> str:
@@ -166,6 +183,8 @@ class NativeDriver(Driver):
         server_params = {name: _Param(value) for name, value in params.items()} if params else None
         try:
             if data is not None:
+                if isinstance(data, NativeInsertData):
+                    settings["insert_block_size"] = data.block_size
                 # clickhouse_driver treats generators (but not other iterables) as insert data
                 client.execute(query, (row for row in data), settings=settings)
                 return NativeResponse([], [])
@@ -346,4 +365,4 @@ def _escape(value: str | bytes) -> str:
     return escape(value, quote=False)
 
 
-__all__ = ["NativeCodec", "NativeDriver", "NativeResponse"]
+__all__ = ["NativeCodec", "NativeDriver", "NativeInsertData", "NativeResponse"]

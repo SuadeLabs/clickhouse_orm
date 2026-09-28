@@ -41,7 +41,7 @@ from clickhouse_orm.fields import (
 )
 from clickhouse_orm.funcs import F
 from clickhouse_orm.models import Model
-from clickhouse_orm.native import NativeCodec, NativeDriver, NativeResponse, _Param, _shortest_float32
+from clickhouse_orm.native import NativeCodec, NativeDriver, NativeInsertData, NativeResponse, _Param, _shortest_float32
 
 from .base_test_with_data import Person, TestCaseWithData
 from .conftest import NATIVE_URL_ENV
@@ -217,6 +217,10 @@ class NativeDriverTestCase(unittest.TestCase):
         self.assertEqual(rows, [(1,), (2,)])
         self.assertEqual(response.text, "")
 
+    def test_send_insert_block_size(self):
+        self.driver.send("INSERT INTO t (x) VALUES", data=NativeInsertData(iter([(1,)]), 10))
+        self.assertEqual(self.client.execute.call_args.kwargs["settings"], {"insert_block_size": 10})
+
     def test_server_error(self):
         self.client.execute.side_effect = ServerException("DB::Exception: Syntax error", code=62)
         with self.assertRaises(ServerError) as cm:
@@ -272,6 +276,10 @@ class NativeCodecTestCase(unittest.TestCase):
         ((statement, rows),) = self.codec.encode_inserts(Row, [Row(name="a", num=1), Row(name="b", num=2)])
         self.assertEqual(statement, "INSERT INTO $table (`name`,`num`) VALUES")
         self.assertEqual(list(rows), [("a", 1), ("b", 2)])
+
+    def test_encode_inserts_block_size(self):
+        ((_, data),) = self.codec.encode_inserts(Row, [Row(num=1)], batch_size=10)
+        self.assertEqual(data.block_size, 10)
 
     def test_encode_is_lazy(self):
         def instances():

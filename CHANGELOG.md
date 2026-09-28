@@ -35,6 +35,7 @@ Unreleased
   `RequestsDriver` (see "Drivers" in the docs). A driver's `codec` attribute selects its `Codec`
 - New optional `NativeDriver` (`clickhouse_orm.native`) using the native TCP protocol via `clickhouse-driver`;
   install with `pip install clickhouse_orm[native]`
+- `scripts/benchmark.py` compares the drivers for bulk inserts and selects (results under "Performance" in the docs)
 - The test suite can be run against the native driver with `pytest --driver=native`
 - bugfix: deep-copying a `QuerySet` (e.g. when used as a subquery filter) no longer copies its database
 - bugfix: `select_rows` array elements are now typed like `clickhouse_driver` (e.g. enum names, naive datetimes)

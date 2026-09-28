@@ -329,9 +329,46 @@ with the default driver. The differences are:
 - `raw` returns an approximation of the `TabSeparated` output, and any `FORMAT` clause in the query is ignored.
 - `select_rows` returns values of every type as Python objects (e.g. tuples, dicts and nested lists), where the
   default driver returns the text of types it does not parse.
-- The `batch_size` of `insert` is ignored, since `clickhouse_driver` splits the rows into blocks itself.
 - Query parameters require a server version which supports them over the native protocol; older servers raise
   a `DatabaseException`.
+
+### Performance
+
+The table below compares the drivers for 100,000 rows of a model with 101 columns: 15 `Int32`, 10 `UInt64`,
+15 `Float64`, 5 `Float32`, 20 `String`, 5 `LowCardinality(String)`, 10 `Date`, 10 `DateTime`, 5 `Enum8`,
+3 `Decimal(18, 4)` and 2 `Nullable(Int32)` columns, plus a `UInt32` id (about 76 MB uncompressed in ClickHouse).
+
+| Operation | Driver | Wall time (s) | CPU time (s) | Rows/s | Peak memory (MB) |
+|---|---|---:|---:|---:|---:|
+| Build 100k model instances | - | 21.78 | 21.77 | 4,592 | 731 |
+| `insert` a list of instances | HTTP | 7.19 | 6.88 | 13,913 | 3 |
+| `insert` a list of instances | native | 5.41 | 4.82 | 18,493 | 3 |
+| `insert` from a generator of new instances | HTTP | 27.54 | 27.20 | 3,631 | 4 |
+| `insert` from a generator of new instances | native | 25.77 | 25.17 | 3,880 | 11 |
+| Iterate over `select` (model instances) | HTTP | 24.02 | 23.91 | 4,163 | 0 |
+| Iterate over `select` (model instances) | native | 17.04 | 16.96 | 5,870 | 554 |
+| Iterate over `select_rows` (tuples) | HTTP | 10.54 | 10.40 | 9,490 | 0 |
+| Iterate over `select_rows` (tuples) | native | 5.29 | 5.23 | 18,911 | 554 |
+
+Each figure is the median of 3 runs, each in a fresh process. CPU time is the client's (the server's share is
+roughly the difference to the wall time), and peak memory is the growth of the process's peak resident memory
+during the operation, so it excludes model instances which already existed. The server and client ran on the same
+machine (Python 3.11.15, ClickHouse 25.8.33.6, clickhouse-driver 0.2.10, AMD Ryzen 7 PRO 4750U), with the default
+`batch_size` of 1000. To reproduce, run
+`python scripts/benchmark.py --http-url http://localhost:8123/ --native-url clickhouse://localhost:9000`.
+
+Some conclusions:
+
+- Nearly all the time is spent in Python rather than on the server or network, and most of it building and
+  validating model instances: creating 100k instances takes about 22 s whichever driver is used, which is why
+  `insert` from a generator and `select` are much slower than `insert` from an existing list and `select_rows`.
+  When model instances are not needed, `select_rows` is 2.3x (HTTP) to 3.2x (native) faster than `select`.
+- The native driver is 1.3x to 2x faster than HTTP, since values do not need to be formatted as text and parsed.
+- Both drivers stream inserts in chunks of `batch_size` rows, so inserting from an iterator uses little memory
+  (holding 100k instances in a list takes about 730 MB).
+- The HTTP driver streams `select` and `select_rows` results, so iterating over them uses constant memory. The
+  native driver reads the whole result first (about 5.5 KB per row here). For large results, use the HTTP driver
+  or split the query into smaller ones (e.g. by ranges of the table's sorting key).
 
 ### Custom drivers
 
