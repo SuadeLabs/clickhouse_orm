@@ -479,7 +479,7 @@ clickhouse_orm.query
 
 ### QuerySet
 
-#### QuerySet(model_cls, database)
+#### QuerySet(model_cls, executor)
 
 
 #### conditions_as_sql(prewhere=True)

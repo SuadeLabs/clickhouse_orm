@@ -270,6 +270,36 @@ values aggregated for all rows suitable for filters.
     'Alexandra': 2
     '': 100
 
+Executors
+---------
+
+A queryset only generates SQL. Running it is delegated to an `Executor`, which is any object implementing
+`select(query, model_class=None, settings=None)`, `raw(query, settings=None, stream=False)` and
+`count(model_class, conditions=None)`. `Database` is the standard executor, but `objects_in` accepts any object
+with these methods. This makes it possible to test query building without a ClickHouse server:
+
+    class RecordingExecutor:
+        def __init__(self):
+            self.queries = []
+
+        def select(self, query, model_class=None, settings=None):
+            self.queries.append(query)
+            return iter([])
+
+        def raw(self, query, settings=None, stream=False):
+            self.queries.append(query)
+            return ''
+
+        def count(self, model_class, conditions=None):
+            return 0
+
+    executor = RecordingExecutor()
+    list(Person.objects_in(executor).filter(first_name='Ben'))
+    print(executor.queries)  # ["SELECT ...\nFROM `person`\nWHERE first_name = 'Ben'"]
+
+Generated queries use unqualified table names and the `$db` placeholder, so an executor is expected to substitute
+`$db` and resolve table names against its own database, as `Database` does.
+
 ---
 
 [<< Importing ORM Classes](importing_orm_classes.md) | [Table of Contents](toc.md) | [Field Options >>](field_options.md)

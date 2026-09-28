@@ -19,6 +19,9 @@ Unreleased
 - Serialisation moved into a pluggable `Codec` (`clickhouse_orm.codec`); `Database.codec` defaults to `TSVCodec`,
   which owns the wire formats, TSV header parsing and insert batching
 - `insert(batch_size=n)` now sends exactly `n` rows per chunk (previously the first chunk held one row fewer)
+- `QuerySet` no longer depends on `Database`: it runs its SQL through any `Executor` (`clickhouse_orm.executor`), a
+  protocol with `select`, `raw` and `count` which `Database` implements. `Model.objects_in` accepts any executor,
+  so query building can be unit-tested without a server. `QuerySet._database` remains as an alias of `_executor`
 - bugfix: `DateTimeField.to_python` ignored `timezone_in_use` for naive `datetime` / `date` values
 - New `Database.select_rows(query, settings=None)` returning a `RowResult` of plain tuples plus `(name, type)`
   column metadata, with values typed like `clickhouse_driver` (see "Reading Rows" in the docs)

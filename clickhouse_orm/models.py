@@ -467,6 +467,8 @@ class Model(metaclass=ModelBase):
     def objects_in(cls, database):
         """
         Returns a `QuerySet` for selecting instances of this model class.
+
+        - `database`: the `Database` (or any other `Executor`) which runs the queries.
         """
         return QuerySet(cls, database)
 

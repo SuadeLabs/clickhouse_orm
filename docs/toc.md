@@ -36,6 +36,7 @@
       * [Mutations](querysets.md#mutations)
       * [Aggregation](querysets.md#aggregation)
          * [Adding totals](querysets.md#adding-totals)
+      * [Executors](querysets.md#executors)
 
    * [Field Options](field_options.md#field-options)
       * [default](field_options.md#default)

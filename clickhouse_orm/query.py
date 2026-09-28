@@ -293,16 +293,22 @@ class QuerySet:
     A queryset is an object that represents a database query using a specific `Model`.
     It is lazy, meaning that it does not hit the database until you iterate over its
     matching rows (model instances).
+
+    Building the query is pure SQL generation; running it is delegated to an `Executor`
+    (normally a `Database`).
     """
 
-    def __init__(self, model_cls, database):
+    def __init__(self, model_cls, executor):
         """
         Initializer. It is possible to create a queryset like this, but the standard
         way is to use `MyModel.objects_in(database)`.
+
+        - `model_cls`: the model to query.
+        - `executor`: the `Executor` which runs the generated SQL, normally a `Database`.
         """
         self.model = model_cls
         self._model_cls = model_cls
-        self._database = database
+        self._executor = executor
         self._order_by = []
         self._where_q = Q()
         self._prewhere_q = Q()
@@ -315,11 +321,16 @@ class QuerySet:
         self._distinct = False
         self._final = False
 
+    @property
+    def _database(self):
+        # Backwards-compatible alias for the executor
+        return self._executor
+
     def __iter__(self):
         """
         Iterates over the model instances matching this queryset
         """
-        return self._database.select(self.as_sql(), self._model_cls)
+        return self._executor.select(self.as_sql(), self._model_cls)
 
     def __bool__(self):
         """
@@ -438,12 +449,12 @@ class QuerySet:
         if self._distinct or self._limits:
             # Use a subquery, since a simple count won't be accurate
             sql = "SELECT count() FROM (%s)" % self.as_sql()
-            raw = self._database.raw(sql)
+            raw = self._executor.raw(sql)
             return int(raw) if raw else 0
 
         # Simple case
         conditions = (self._where_q & self._prewhere_q).to_sql(self._model_cls)
-        return self._database.count(self._model_cls, conditions)
+        return self._executor.count(self._model_cls, conditions)
 
     def order_by(self, *field_names):
         """
@@ -564,7 +575,7 @@ class QuerySet:
         self._verify_mutation_allowed()
         conditions = (self._where_q & self._prewhere_q).to_sql(self._model_cls)
         sql = "ALTER TABLE $db.`%s` DELETE WHERE %s" % (self._model_cls.table_name(), conditions)
-        self._database.raw(sql)
+        self._executor.raw(sql)
         return self
 
     def update(self, **kwargs):
@@ -578,7 +589,7 @@ class QuerySet:
         fields = comma_join("`%s` = %s" % (name, arg_to_sql(expr)) for name, expr in kwargs.items())
         conditions = (self._where_q & self._prewhere_q).to_sql(self._model_cls)
         sql = "ALTER TABLE $db.`%s` UPDATE %s WHERE %s" % (self._model_cls.table_name(), fields, conditions)
-        self._database.raw(sql)
+        self._executor.raw(sql)
         return self
 
     def _verify_mutation_allowed(self):
@@ -627,7 +638,7 @@ class AggregateQuerySet(QuerySet):
         ```
         At least one calculated field is required.
         """
-        super().__init__(base_qs._model_cls, base_qs._database)
+        super().__init__(base_qs._model_cls, base_qs._executor)
         assert calculated_fields, "No calculated fields specified for aggregation"
         self._fields = grouping_fields
         self._grouping_fields = grouping_fields
@@ -673,14 +684,14 @@ class AggregateQuerySet(QuerySet):
         )
 
     def __iter__(self):
-        return self._database.select(self.as_sql())  # using an ad-hoc model
+        return self._executor.select(self.as_sql())  # using an ad-hoc model
 
     def count(self):
         """
         Returns the number of rows after aggregation.
         """
         sql = "SELECT count() FROM (%s)" % self.as_sql()
-        raw = self._database.raw(sql)
+        raw = self._executor.raw(sql)
         return int(raw) if raw else 0
 
     def with_totals(self):

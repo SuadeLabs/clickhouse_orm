@@ -1180,11 +1180,14 @@ A queryset is an object that represents a database query using a specific `Model
 It is lazy, meaning that it does not hit the database until you iterate over its
 matching rows (model instances).
 
-#### QuerySet(model_cls, database)
+#### QuerySet(model_cls, executor)
 
 
 Initializer. It is possible to create a queryset like this, but the standard
 way is to use `MyModel.objects_in(database)`.
+
+- `model_cls`: the model to query.
+- `executor`: the `Executor` which runs the generated SQL, normally a `Database`.
 
 
 #### aggregate(*args, **kwargs)
