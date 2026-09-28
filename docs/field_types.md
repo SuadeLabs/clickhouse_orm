@@ -48,11 +48,43 @@ A `DateTimeField` and `DateTime64Field` can be assigned values from one of the f
 -   float (DateTime64Field only) - number of seconds and microseconds since the Unix epoch
 -   string in `YYYY-MM-DD HH:MM:SS` format or [ISO 8601](https://en.wikipedia.org/wiki/ISO_8601)-compatible format
 
-The assigned value always gets converted to a timezone-aware `datetime` in UTC. The only exception is when the assigned value is a timezone-aware `datetime`, in which case it will not be changed.
+Values are either *naive* (a wall-clock time without a timezone) or *aware* (an absolute point in time), and the ORM treats them the same way that ClickHouse does:
 
-DateTime values that are read from the database are kept in the database-defined timezone - either the one defined for the field, or the global timezone defined in the database configuration.
+-   A naive value is a wall-clock time **in the column's timezone** - the field's `timezone` if it has one, and otherwise the server's timezone. Naive values are written to the database as text (e.g. `'2020-06-11 04:00:00'`) and ClickHouse interprets them in the column's timezone.
+-   An aware value is an absolute point in time, written to the database as a Unix timestamp. Integers, floats and strings with a UTC offset (e.g. `2020-06-11T04:00:00+03:00`) are aware too.
 
-It is strongly recommended to set the server timezone to UTC and to store all datetime values in that timezone, in order to prevent confusion and subtle bugs. Conversion to a different timezone should only be performed when the value needs to be displayed.
+When a value is assigned:
+
+-   Fields **without** a timezone keep naive values naive, and aware values unchanged.
+-   Fields **with** a timezone localize naive values to that timezone, and keep aware values unchanged.
+
+When reading from the database, the column's type decides the result, whichever model is used for the query:
+
+-   Columns without a timezone (e.g. `DateTime`) are read as naive wall-clock times in the server's timezone - exactly what was inserted, if a naive value was inserted.
+-   Columns with a timezone (e.g. `DateTime('Europe/Madrid')`) are read as aware values in that timezone.
+
+```python
+class Event(Model):
+    local_time = DateTimeField()                          # DateTime
+    madrid_time = DateTimeField(timezone='Europe/Madrid') # DateTime('Europe/Madrid')
+
+event = Event(local_time='2020-06-11 04:00:00', madrid_time='2020-06-11 04:00:00')
+event.local_time   # datetime(2020, 6, 11, 4, 0)
+event.madrid_time  # datetime(2020, 6, 11, 4, 0, tzinfo=<DstTzInfo 'Europe/Madrid' CEST+2:00:00 DST>)
+db.insert([event])
+event = Event.objects_in(db)[0]  # both values are read back unchanged
+```
+
+Some things to be aware of:
+
+-   Aware values inserted into columns without a timezone are read back as naive values in the server's timezone. This includes a field's default value (the Unix epoch), so `Event().local_time` is aware but reads back as `datetime(1970, 1, 1, 0, 0)` on a UTC server.
+-   When a model field has a timezone but the column in the query doesn't (or has a different one), the result follows the column. It is best to keep model definitions in sync with the table schema.
+-   Naive and aware values cannot be compared in Python (`==` is always false and `<` raises `TypeError`), so be consistent in how you use each field.
+-   Some older ClickHouse versions add the server's timezone to the type of function results (e.g. `toStartOfHour(dt)` returns `DateTime('UTC')`), so these results are aware.
+
+The same rules apply to [query parameters](models_and_databases.md#query-parameters) and to both [drivers](models_and_databases.md#drivers).
+
+It is strongly recommended to set the server timezone to UTC, in order to prevent confusion and subtle bugs. Conversion to a different timezone should only be performed when the value needs to be displayed.
 
 
 Working with enum fields

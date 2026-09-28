@@ -28,7 +28,6 @@ Unreleased
 - `QuerySet.parameterized()` binds filter values and string / date / datetime function arguments as query parameters
   instead of inlining them; `QuerySet.as_sql_with_params()` returns the `(sql, params)` pair. Executors receive
   `params` only from parameterized querysets
-- bugfix: `DateTimeField.to_python` ignored `timezone_in_use` for naive `datetime` / `date` values
 - New `Database.select_rows(query, settings=None)` returning a `RowResult` of plain tuples plus `(name, type)`
   column metadata, with values typed like `clickhouse_driver` (see "Reading Rows" in the docs)
 - Pluggable drivers: `Database(db_name, driver=...)` uses any `Driver` subclass instead of the default
@@ -58,6 +57,24 @@ Unreleased
   `None`. `Database.codec` is now taken from `Database.driver.codec`
 - `Database.db_url` is `None` when a custom driver is given; passing `db_url`, `username` or `password` together
   with `driver` raises a `ValueError`
+- **Datetime semantics (major breaking change).** Naive datetimes are now wall-clock times in the column's timezone,
+  as in ClickHouse and `clickhouse_driver`, instead of being treated as UTC (see "DateTimeField and Time Zones" in
+  the docs):
+  - `DateTimeField` / `DateTime64Field` without a `timezone` keep naive values naive on assignment (previously they
+    were converted to aware UTC). Fields with a `timezone` localize naive values to it (previously to UTC)
+  - Columns without a timezone (e.g. `DateTime`) are now read as naive datetimes in the server's timezone, by
+    `select`, querysets and `select_rows` alike and with either driver. Columns with a timezone are read as aware
+    values in the column's timezone. The column type decides, not the model field
+  - Naive values are written as wall-clock text (`'2020-06-11 04:00:00'`) rather than as a UTC Unix timestamp, in
+    inserts, `to_db_string`, function arguments (`toDateTime('...')`) and query parameters, so ClickHouse interprets
+    them in the column's timezone. Aware values are still written as Unix timestamps
+  - `DateTimeField.to_python` ignores `timezone_in_use`; custom fields still receive the server timezone
+  - Aware values (including the default, the Unix epoch) inserted into columns without a timezone are read back as
+    naive server wall-clock times
+  - To migrate: on a UTC server, replace comparisons with aware UTC values by naive ones (e.g.
+    `dt.replace(tzinfo=None)`), or give the field a timezone (e.g. `DateTimeField(timezone='UTC')`, which changes the
+    column type to `DateTime('UTC')`) to keep reading aware values. On other servers, check any code which relied
+    on naive values meaning UTC
 
 v3.2.0
 ------

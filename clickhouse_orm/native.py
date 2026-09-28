@@ -87,7 +87,8 @@ class NativeCodec(Codec):
     """
     The codec of `NativeDriver`. Values are exchanged as Python objects, which `clickhouse_driver` converts to and
     from ClickHouse's binary Native format, so only values whose Python representation differs from the model's
-    are converted: datetimes (to apply the timezone), enums, NULL-like values and custom fields.
+    are converted: enums, NULL-like values and custom fields. Datetimes are returned by `clickhouse_driver` like
+    the ORM represents them: naive for columns without a timezone, and aware in the column's timezone otherwise.
     """
 
     select_format = None
@@ -277,19 +278,17 @@ def _needs_to_python(field: Field) -> bool:
     """Whether the values of `field` returned by `clickhouse_driver` must be converted by `to_python` with a timezone."""
     if isinstance(field, _WRAPPER_FIELDS) and _is_builtin(field):
         return _needs_to_python(field.inner_field)
-    return isinstance(field, orm_fields.DateTimeField) or not _is_builtin(field)
+    return not _is_builtin(field)
 
 
 def _value_decoder(field: Field, timezone: datetime.tzinfo) -> Callable[[Any], Any] | None:
     """
     Returns a function converting a value returned by `clickhouse_driver` for `field`, before it is assigned to the
-    model, or `None` when assignment suffices. Datetimes without a timezone are returned in the server's timezone,
-    which assignment does not know about. Custom fields receive the timezone, like when reading text formats.
+    model, or `None` when assignment suffices. Custom fields receive the server's timezone, as with the TSV codec.
     """
     if not _needs_to_python(field):
         return None
-    field_timezone = getattr(field, "timezone", None) or timezone
-    return lambda value: field.to_python(value, field_timezone)
+    return lambda value: field.to_python(value, timezone)
 
 
 def _normalize_rows(columns: list[Column], rows: list[tuple[Any, ...]]) -> list[tuple[Any, ...]]:

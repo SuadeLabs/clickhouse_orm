@@ -219,7 +219,8 @@ streamed from the response and can only be iterated once. Duplicate column names
 Values use the same Python types as `clickhouse_driver`:
 
 - `DateTime` / `DateTime64` without an explicit timezone are naive datetimes in the server's timezone; columns with
-  an explicit timezone (e.g. `DateTime('UTC')`) are timezone-aware
+  an explicit timezone (e.g. `DateTime('UTC')`) are timezone-aware. Model instances follow the same rules, see
+  [DateTimeField and Time Zones](field_types.md#datetimefield-and-time-zones)
 - `Enum` values are returned as their name (`str`), `Bool` as `bool`, `Nullable` NULLs as `None`
 - `FixedString` values have trailing null bytes removed; strings which are not valid UTF-8 are returned as `bytes`
 - Types which are not parsed yet (`Tuple`, `Map`, nested arrays, `JSON`, ...) are returned as their text representation
@@ -252,9 +253,10 @@ makes this the safe way to use values from untrusted sources. `select`, `select_
               model_class=Person, params={"name": name, "height": 1.8})
     db.count(Person, conditions="birthday >= {since:Date}", params={"since": date(2000, 1, 1)})
 
-Supported values are `None` (for `Nullable` types), strings, booleans, numbers, `Decimal`, dates, datetimes (naive
-ones are treated as UTC, as elsewhere in the ORM), UUIDs, IP addresses, enums (sent by name), lists (arrays),
-tuples and dicts (maps). A datetime with microseconds can only be passed to a `DateTime64` placeholder. For other
+Supported values are `None` (for `Nullable` types), strings, booleans, numbers, `Decimal`, dates, datetimes, UUIDs,
+IP addresses, enums (sent by name), lists (arrays), tuples and dicts (maps). As elsewhere in the ORM, naive datetimes
+are wall-clock times in the placeholder type's timezone (see
+[DateTimeField and Time Zones](field_types.md#datetimefield-and-time-zones)). A datetime with microseconds can only be passed to a `DateTime64` placeholder. For other
 types, pass an `EncodedParam` holding text in ClickHouse's escaped format, e.g. `EncodedParam.for_field(field, value)`
 to encode a value exactly like a model field does.
 

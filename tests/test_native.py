@@ -105,7 +105,7 @@ class AllTypes(Model):
 
 
 def _all_types_instances():
-    moment = datetime.datetime(2020, 5, 17, 13, 45, 12, tzinfo=pytz.utc)
+    moment = datetime.datetime(2020, 5, 17, 13, 45, 12)
     return [
         AllTypes(
             id=1,
@@ -118,7 +118,7 @@ def _all_types_instances():
             dec=Decimal("3.14159"),
             date=datetime.date(2021, 3, 4),
             dt=moment,
-            dt_tz=moment,
+            dt_tz=JERUSALEM.localize(moment),
             dt64=moment.replace(microsecond=123456),
             colour=Colour.green,
             colours=[Colour.red, Colour.green],
@@ -333,10 +333,12 @@ class NativeCodecTestCase(unittest.TestCase):
             [(naive, JERUSALEM.localize(naive), [naive])],
         )
         (row,) = self.codec.decode(response, AllTypes, pytz.timezone("Europe/Madrid"))
-        expected = datetime.datetime(2020, 1, 1, 11, 0, tzinfo=pytz.utc)
-        self.assertEqual(row.dt, expected)
-        self.assertEqual(row.dt_tz, datetime.datetime(2020, 1, 1, 10, 0, tzinfo=pytz.utc))
-        self.assertEqual(row.datetimes, [expected])
+        # Values are used as returned by clickhouse-driver: naive unless the column has a timezone
+        self.assertEqual(row.dt, naive)
+        self.assertIsNone(row.dt.tzinfo)
+        self.assertEqual(row.dt_tz, JERUSALEM.localize(naive))
+        self.assertEqual(row.dt_tz.tzinfo.zone, "Asia/Jerusalem")
+        self.assertEqual(row.datetimes, [naive])
 
     def test_decode_custom_field(self):
         timezones = []
@@ -459,6 +461,9 @@ class CrossDriverTestCase(_NativeTestCase):
         instances = _all_types_instances()
         writer.insert(instances)
         self.assertEqual(self._read(self.native), self._read(self.http))
+        # Default datetimes are absolute (the epoch), so columns without a timezone read them back as naive
+        epoch = DateTimeField.class_default.astimezone(self.http.server_timezone).replace(tzinfo=None)
+        instances[1].dt = instances[1].dt64 = epoch
         self.assertEqual(self._read(self.http), [instance.to_dict() for instance in instances])
 
     def test_insert_http(self):
@@ -466,6 +471,16 @@ class CrossDriverTestCase(_NativeTestCase):
 
     def test_insert_native(self):
         self._check_models(self.native)
+
+    def test_aware_values_in_naive_columns(self):
+        moment = pytz.timezone("Asia/Tokyo").localize(datetime.datetime(2020, 5, 17, 13, 45, 12))
+        expected = moment.astimezone(self.http.server_timezone).replace(tzinfo=None)
+        for writer in (self.http, self.native):
+            writer.insert([AllTypes(id=1, dt=moment, dt64=moment, datetimes=[moment])])
+            for reader in (self.http, self.native):
+                (instance,) = AllTypes.objects_in(reader)
+                self.assertEqual((instance.dt, instance.dt64, instance.datetimes), (expected, expected, [expected]))
+            self.http.raw("TRUNCATE TABLE $db.alltypes")
 
     def test_insert_func_defaults(self):
         self.native.create_table(RowWithFuncDefault)

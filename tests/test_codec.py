@@ -84,8 +84,13 @@ class TSVCodecTestCase(unittest.TestCase):
 
     def test_decode_timezone(self):
         lines = [b"ts", b"DateTime", b"2020-01-01 12:00:00"]
+        # Columns without a timezone are naive, whatever the server's timezone
         (row,) = self.codec.decode(_response(lines), WithDateTime, pytz.timezone("Asia/Jerusalem"))
-        self.assertEqual(row.ts, datetime.datetime(2020, 1, 1, 10, 0, tzinfo=pytz.utc))
+        self.assertEqual(row.ts, datetime.datetime(2020, 1, 1, 12, 0))
+        lines = [b"ts", b"DateTime(\\'Asia/Tokyo\\')", b"2020-01-01 12:00:00"]
+        (row,) = self.codec.decode(_response(lines), WithDateTime, pytz.timezone("Asia/Jerusalem"))
+        self.assertEqual(row.ts, pytz.timezone("Asia/Tokyo").localize(datetime.datetime(2020, 1, 1, 12, 0)))
+        self.assertEqual(row.ts.tzinfo.zone, "Asia/Tokyo")
 
 
 # Captured from a ClickHouse 25.8 server

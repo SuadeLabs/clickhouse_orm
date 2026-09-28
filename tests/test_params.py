@@ -41,8 +41,10 @@ class FormatParamTestCase(unittest.TestCase):
             (Decimal("1.50"), "1.50"),
             (datetime.date(2020, 6, 11), "2020-06-11"),
             (pytz.utc.localize(datetime.datetime(2020, 6, 11, 9)), "1591866000"),
-            (datetime.datetime(2020, 6, 11, 9), "1591866000"),  # naive values are treated as UTC
-            (datetime.datetime(2020, 6, 11, 9, 0, 0, 500000), "1591866000.500000"),
+            (pytz.utc.localize(datetime.datetime(2020, 6, 11, 9, 0, 0, 500000)), "1591866000.500000"),
+            # Naive values are wall-clock times, interpreted by the server in the column's timezone
+            (datetime.datetime(2020, 6, 11, 9), "2020-06-11 09:00:00"),
+            (datetime.datetime(2020, 6, 11, 9, 0, 0, 500000), "2020-06-11 09:00:00.500000"),
             (uuid.UUID(int=1), "00000000-0000-0000-0000-000000000001"),
             (IPv4Address("1.2.3.4"), "1.2.3.4"),
             (Color.green, "green"),
@@ -69,7 +71,9 @@ class FormatParamTestCase(unittest.TestCase):
 
     def test_encoded_param_for_field(self):
         field = ArrayField(NullableField(DateTimeField()))
-        self.assertEqual(EncodedParam.for_field(field, ["2020-06-11 09:00:00", None]).text, "['1591866000', NULL]")
+        self.assertEqual(
+            EncodedParam.for_field(field, ["2020-06-11 09:00:00", None]).text, "['2020-06-11 09:00:00', NULL]"
+        )
 
 
 class CollectParamsTestCase(unittest.TestCase):

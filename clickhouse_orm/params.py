@@ -39,7 +39,7 @@ class EncodedParam:
 
     @classmethod
     def for_field(cls, field: Field, value: Any) -> EncodedParam:
-        """Encodes `value` using the conversion rules of `field` (naive datetimes are treated as UTC)."""
+        """Encodes `value` using the conversion rules of `field`."""
         return cls(field._param_text(field.to_python(value, pytz.utc)))
 
 
@@ -97,8 +97,9 @@ def collect_params() -> Iterator[QueryParams]:
 def format_param(value: Any) -> str:
     """
     Encodes a Python value as the text of a query parameter. Supports None, strings, booleans, numbers,
-    dates, datetimes (naive ones are treated as UTC), UUIDs, IP addresses, enums (by name), lists (arrays),
-    tuples and dicts (maps), as well as `EncodedParam` instances which are passed through unchanged.
+    dates, datetimes (naive ones are wall-clock times in the placeholder's timezone), UUIDs, IP addresses, enums
+    (by name), lists (arrays), tuples and dicts (maps), as well as `EncodedParam` instances which are passed
+    through unchanged.
     """
     if isinstance(value, EncodedParam):
         return value.text
@@ -126,6 +127,9 @@ def _format_scalar(value: Any) -> str:
     if isinstance(value, (int, float, Decimal)):
         return str(value)
     if isinstance(value, datetime):
+        if value.tzinfo is None or value.utcoffset() is None:
+            # Naive datetimes are wall-clock times, which ClickHouse interprets in the placeholder type's timezone
+            return value.isoformat(" ", "microseconds" if value.microsecond else "seconds")
         timestamp = timegm(value.utctimetuple())
         return f"{timestamp}.{value.microsecond:06d}" if value.microsecond else str(timestamp)
     if isinstance(value, date):

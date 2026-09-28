@@ -326,7 +326,8 @@ The `field_names` list must match the fields defined in the model, but does not 
 
 - `line`: the TSV-formatted data.
 - `field_names`: names of the model fields in the data.
-- `timezone_in_use`: the timezone to use when parsing dates and datetimes. Some fields use their own timezones.
+- `timezone_in_use`: passed to each field's `to_python`. Datetime fields ignore it: naive values stay naive,
+  unless the field has its own timezone.
 - `database`: if given, sets the database that this instance belongs to.
 
 
@@ -463,7 +464,8 @@ The `field_names` list must match the fields defined in the model, but does not 
 
 - `line`: the TSV-formatted data.
 - `field_names`: names of the model fields in the data.
-- `timezone_in_use`: the timezone to use when parsing dates and datetimes. Some fields use their own timezones.
+- `timezone_in_use`: passed to each field's `to_python`. Datetime fields ignore it: naive values stay naive,
+  unless the field has its own timezone.
 - `database`: if given, sets the database that this instance belongs to.
 
 
@@ -605,7 +607,8 @@ The `field_names` list must match the fields defined in the model, but does not 
 
 - `line`: the TSV-formatted data.
 - `field_names`: names of the model fields in the data.
-- `timezone_in_use`: the timezone to use when parsing dates and datetimes. Some fields use their own timezones.
+- `timezone_in_use`: passed to each field's `to_python`. Datetime fields ignore it: naive values stay naive,
+  unless the field has its own timezone.
 - `database`: if given, sets the database that this instance belongs to.
 
 
@@ -778,7 +781,8 @@ The `field_names` list must match the fields defined in the model, but does not 
 
 - `line`: the TSV-formatted data.
 - `field_names`: names of the model fields in the data.
-- `timezone_in_use`: the timezone to use when parsing dates and datetimes. Some fields use their own timezones.
+- `timezone_in_use`: passed to each field's `to_python`. Datetime fields ignore it: naive values stay naive,
+  unless the field has its own timezone.
 - `database`: if given, sets the database that this instance belongs to.
 
 
@@ -3568,7 +3572,8 @@ The `field_names` list must match the fields defined in the model, but does not 
 
 - `line`: the TSV-formatted data.
 - `field_names`: names of the model fields in the data.
-- `timezone_in_use`: the timezone to use when parsing dates and datetimes. Some fields use their own timezones.
+- `timezone_in_use`: passed to each field's `to_python`. Datetime fields ignore it: naive values stay naive,
+  unless the field has its own timezone.
 - `database`: if given, sets the database that this instance belongs to.
 
 

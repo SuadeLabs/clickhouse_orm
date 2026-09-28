@@ -5,15 +5,16 @@ from __future__ import annotations
 import abc
 import codecs
 import datetime
+import re
 from io import BytesIO
 from typing import TYPE_CHECKING, Any
 
 import pytz
 
 from .compiler import quote_identifier
-from .fields import ArrayField, BaseEnumField, DateTimeField
+from .fields import ArrayField, BaseEnumField
 from .models import Model, ModelBase
-from .utils import parse_array, parse_tsv
+from .utils import parse_array, parse_tsv, unescape
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Iterator
@@ -82,7 +83,9 @@ class Codec(abc.ABC):
         - `response`: the response returned by the driver's `send`.
         - `model_class`: the model class matching the query's columns,
           or `None` for getting back instances of an ad-hoc model.
-        - `timezone`: the timezone for parsing dates and datetimes. Some fields use their own timezones.
+        - `timezone`: the server's timezone, passed to the `to_python` of custom fields.
+
+        Datetimes are converted according to their column's type, as in `decode_rows`, before being assigned.
         """
 
     @abc.abstractmethod
@@ -91,11 +94,12 @@ class Codec(abc.ABC):
         Deserialises the response to a SELECT query into a `RowResult`.
 
         Values use the same Python types as `clickhouse_driver`, so that results do not depend on the driver.
-        In particular, `DateTime` columns without an explicit timezone are returned as naive datetimes in
-        `timezone` (the server's timezone), and enums are returned as their names.
+        In particular, `DateTime` columns without an explicit timezone are returned as naive datetimes (wall-clock
+        times in the server's timezone), columns with a timezone as aware datetimes in that timezone, and enums
+        as their names.
 
         - `response`: the response returned by the driver's `send`.
-        - `timezone`: the timezone for parsing dates and datetimes. Some columns use their own timezones.
+        - `timezone`: the server's timezone.
         """
 
 
@@ -137,10 +141,12 @@ class TSVCodec(Codec):
         field_names = parse_tsv(next(lines))
         field_types = parse_tsv(next(lines))
         model_class = model_class or ModelBase.create_ad_hoc_model(zip(field_names, field_types))
+        parsers = [_cell_parser(db_type, timezone) for db_type in field_types]
         for line in lines:
             # skip blank line left by WITH TOTALS modifier
             if line:
-                yield model_class.from_tsv(line, field_names, timezone)
+                cells = line.split(b"\t")
+                yield model_class(**{name: parse(cell) for name, parse, cell in zip(field_names, parsers, cells)})
 
     def decode_rows(self, response, timezone=pytz.utc):
         lines = response.iter_lines()
@@ -161,6 +167,8 @@ class TSVCodec(Codec):
 
 # Types the ORM cannot parse yet are returned as their ClickHouse text representation
 _TEXT_TYPE_PREFIXES = ("Tuple(", "Map(", "Nested(", "Variant(", "Dynamic", "JSON", "Object(", "AggregateFunction(")
+_DATETIME_TYPE = re.compile(r"\bDateTime(64)?\b")
+_QUOTED_STRING = re.compile(r"'(?:[^'\\]|\\.)*'")
 _QUOTED_TYPE_PREFIXES = ("Array(", "Tuple(", "Map(", "Nested(")
 _BIG_INT_TYPES = frozenset(["Int128", "UInt128", "Int256", "UInt256"])
 
@@ -202,6 +210,28 @@ def _is_quoted_type(db_type: str) -> bool:
     return db_type.startswith(_QUOTED_TYPE_PREFIXES)
 
 
+def _cell_parser(db_type: str, timezone: datetime.tzinfo) -> Callable[[bytes], Any]:
+    """
+    Returns a function converting a TSV cell of `db_type` to the value assigned to a model field: its text, except
+    for datetimes, which are converted according to the column type (naive for columns without a timezone, and
+    aware in the column's timezone otherwise), like `select_rows` and `clickhouse_driver` do.
+    """
+    quoted = _is_quoted_type(db_type)
+    if _has_datetime(db_type):
+        convert = _row_converter(db_type, timezone)
+        if quoted:
+            return convert
+        return lambda cell: None if cell == b"\\N" else convert(codecs.escape_decode(cell)[0])
+    if quoted:
+        return lambda cell: cell.decode("utf-8")
+    return lambda cell: unescape(cell.decode("utf-8"))
+
+
+def _has_datetime(db_type: str) -> bool:
+    """Whether `db_type` is or contains a `DateTime` / `DateTime64` type (ignoring quoted strings, such as enum labels)."""
+    return _DATETIME_TYPE.search(_QUOTED_STRING.sub("", db_type)) is not None
+
+
 def _row_converter(db_type: str, timezone: datetime.tzinfo) -> Callable[[bytes], Any]:
     """
     Returns a function converting a non-NULL TSV value of `db_type` to its Python value. The value must be
@@ -236,10 +266,7 @@ def _row_converter(db_type: str, timezone: datetime.tzinfo) -> Callable[[bytes],
         return lambda value: [None if item is None else convert(item.encode()) for item in parse_array(value.decode())]
     if isinstance(field, BaseEnumField):
         return lambda value: field.to_python(value.decode(), timezone).name
-    if isinstance(field, DateTimeField):
-        if field.timezone:
-            return lambda value: field.to_python(value.decode(), field.timezone)
-        return lambda value: field.to_python(value.decode(), None)
+    # Datetimes are naive, unless the column has a timezone (which the ad-hoc field then has too)
     return lambda value: field.to_python(value.decode(), timezone)
 
 

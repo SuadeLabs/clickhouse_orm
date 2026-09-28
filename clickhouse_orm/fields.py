@@ -234,34 +234,48 @@ class DateTimeField(Field):
 
     def to_python(self, value, timezone_in_use):
         """
-        Naive values (datetimes, dates and ISO strings without an offset) are localized to `timezone_in_use`,
-        or left naive when it is `None`. Unix timestamps are always returned in UTC.
+        Naive values (datetimes, dates and strings without an offset) are wall-clock times in the column's timezone:
+        they are localized to the field's `timezone` if it has one, and are otherwise kept naive (ClickHouse then
+        interprets them in the server's timezone). Aware datetimes are kept as they are, and Unix timestamps are
+        returned in UTC. `timezone_in_use` is ignored.
         """
         if isinstance(value, datetime.datetime):
-            return self._localize(value, timezone_in_use)
+            return self._localize(value)
         if isinstance(value, datetime.date):
-            return self._localize(datetime.datetime(value.year, value.month, value.day), timezone_in_use)
+            return self._localize(datetime.datetime(value.year, value.month, value.day))
         if isinstance(value, int):
-            return datetime.datetime.utcfromtimestamp(value).replace(tzinfo=pytz.utc)
+            return self._from_timestamp(value)
         if isinstance(value, str):
             if value == "0000-00-00 00:00:00":
                 return self.class_default
             if len(value) == 10:
                 try:
-                    value = int(value)
-                    return datetime.datetime.utcfromtimestamp(value).replace(tzinfo=pytz.utc)
+                    return self._from_timestamp(int(value))
                 except ValueError:
                     pass
-            return self._localize(datetime.datetime.fromisoformat(value), timezone_in_use)
+            return self._localize(datetime.datetime.fromisoformat(value))
         raise ValueError("Invalid value for %s - %r" % (self.__class__.__name__, value))
 
-    @staticmethod
-    def _localize(value, timezone_in_use):
-        if timezone_in_use is None or (value.tzinfo is not None and value.utcoffset() is not None):
+    def _localize(self, value):
+        if self.timezone is None or (value.tzinfo is not None and value.utcoffset() is not None):
             return value
-        return timezone_in_use.localize(value.replace(tzinfo=None))
+        return self.timezone.localize(value.replace(tzinfo=None))
+
+    @staticmethod
+    def _from_timestamp(timestamp):
+        return datetime.datetime.fromtimestamp(timestamp, pytz.utc)
+
+    @staticmethod
+    def _is_naive(value):
+        return value.tzinfo is None or value.utcoffset() is None
 
     def to_db_string(self, value, quote=True):
+        """
+        Naive values are written as wall-clock times (`YYYY-MM-DD HH:MM:SS`), which ClickHouse interprets in the
+        column's timezone, and aware values as Unix timestamps.
+        """
+        if self._is_naive(value):
+            return escape(value.isoformat(" ", "seconds"), quote)
         return escape("%010d" % timegm(value.utctimetuple()), quote)
 
 
@@ -283,13 +297,19 @@ class DateTime64Field(DateTimeField):
 
     def to_db_string(self, value, quote=True):
         """
-        Returns the field's value prepared for writing to the database
-
-        Returns string in 0000000000.000000 format, where remainder digits count is equal to precision
+        Naive values are written as wall-clock times (`YYYY-MM-DD HH:MM:SS.ffffff`), which ClickHouse interprets in
+        the column's timezone, and aware values as Unix timestamps (`0000000000.000000`), with as many fractional
+        digits as the field's precision.
         """
+        precision = self.precision or 0
+        if self._is_naive(value):
+            text = value.isoformat(" ", "seconds")
+            if precision:
+                text += "." + ("%06d" % value.microsecond)[:precision].ljust(precision, "0")
+            return escape(text, quote)
         return escape(
             "{timestamp:0{width}.{precision}f}".format(
-                timestamp=value.timestamp(), width=11 + self.precision, precision=self.precision
+                timestamp=value.timestamp(), width=11 + precision, precision=precision
             ),
             quote,
         )
@@ -298,16 +318,15 @@ class DateTime64Field(DateTimeField):
         try:
             return super().to_python(value, timezone_in_use)
         except ValueError:
-            if isinstance(value, (int, float)):
-                return datetime.datetime.utcfromtimestamp(value).replace(tzinfo=pytz.utc)
+            if isinstance(value, float):
+                return self._from_timestamp(value)
             if isinstance(value, str):
                 left_part = value.split(".")[0]
                 if left_part == "0000-00-00 00:00:00":
                     return self.class_default
                 if len(left_part) == 10:
                     try:
-                        value = float(value)
-                        return datetime.datetime.utcfromtimestamp(value).replace(tzinfo=pytz.utc)
+                        return self._from_timestamp(float(value))
                     except ValueError:
                         pass
             raise

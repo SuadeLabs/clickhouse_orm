@@ -49,6 +49,10 @@ class FuncsTestCase(TestCaseWithData):
         result = self._call_func(func)
         if expected_value != NO_VALUE:
             print("Comparing %s to %s" % (result, expected_value))
+            if isinstance(expected_value, datetime) and expected_value.tzinfo is None and result.tzinfo:
+                # Older servers type some function results with the server's timezone, e.g. DateTime('UTC')
+                self.assertEqual(result.tzinfo.zone, self.database.server_timezone.zone)
+                result = result.replace(tzinfo=None)
             self.assertEqual(result, expected_value)
 
         return result if result else None
@@ -78,7 +82,7 @@ class FuncsTestCase(TestCaseWithData):
         # Date args
         self.assertEqual(F("func", date(2018, 12, 31)).to_sql(), "func(toDate('2018-12-31'))")
         # Datetime args
-        self.assertEqual(F("func", datetime(2018, 12, 31)).to_sql(), "func(toDateTime('1546214400'))")
+        self.assertEqual(F("func", datetime(2018, 12, 31)).to_sql(), "func(toDateTime('2018-12-31 00:00:00'))")
         # Boolean args
         self.assertEqual(F("func", True, False).to_sql(), "func(1, 0)")
         # Timezone args
@@ -221,6 +225,7 @@ class FuncsTestCase(TestCaseWithData):
     def test_date_functions(self):
         d = date(2018, 12, 31)
         dt = datetime(2018, 12, 31, 11, 22, 33)
+        dt_utc = pytz.utc.localize(dt)
         self._test_func(F.toYear(d), 2018)
         self._test_func(F.toYear(dt), 2018)
         self._test_func(F.toISOYear(dt, "Europe/Athens"), 2019)  # 2018-12-31 is ISO year 2019, week 1, day 1
@@ -248,24 +253,26 @@ class FuncsTestCase(TestCaseWithData):
         self._test_func(F.toStartOfQuarter(dt), date(2018, 10, 1))
         self._test_func(F.toStartOfYear(d), date(2018, 1, 1))
         self._test_func(F.toStartOfYear(dt), date(2018, 1, 1))
-        self._test_func(F.toStartOfMinute(dt), datetime(2018, 12, 31, 11, 22, 0, tzinfo=pytz.utc))
+        self._test_func(F.toStartOfMinute(dt), datetime(2018, 12, 31, 11, 22, 0))
         self._test_func(
             F.toStartOfFiveMinute(dt),
-            datetime(2018, 12, 31, 11, 20, 0, tzinfo=pytz.utc),
+            datetime(2018, 12, 31, 11, 20, 0),
         )
         self._test_func(
             F.toStartOfFifteenMinutes(dt),
-            datetime(2018, 12, 31, 11, 15, 0, tzinfo=pytz.utc),
+            datetime(2018, 12, 31, 11, 15, 0),
         )
-        self._test_func(F.toStartOfHour(dt), datetime(2018, 12, 31, 11, 0, 0, tzinfo=pytz.utc))
+        self._test_func(F.toStartOfHour(dt), datetime(2018, 12, 31, 11, 0, 0))
         self._test_func(F.toStartOfISOYear(dt), date(2018, 12, 31))
         self._test_func(
             F.toStartOfTenMinutes(dt),
-            datetime(2018, 12, 31, 11, 20, 0, tzinfo=pytz.utc),
+            datetime(2018, 12, 31, 11, 20, 0),
         )
         self._test_func(F.toStartOfWeek(dt), date(2018, 12, 30))
-        self._test_func(F.toTime(dt), datetime(1970, 1, 2, 11, 22, 33, tzinfo=pytz.utc))
-        self._test_func(F.toUnixTimestamp(dt, "UTC"), int(dt.replace(tzinfo=pytz.utc).timestamp()))
+        self._test_func(F.toTime(dt), datetime(1970, 1, 2, 11, 22, 33))
+        # Naive values are wall-clock times in the server's timezone, aware values are absolute
+        self._test_func(F.toUnixTimestamp(dt, "UTC"), int(self.database.server_timezone.localize(dt).timestamp()))
+        self._test_func(F.toUnixTimestamp(dt_utc), 1546255353)
         self._test_func(F.toYYYYMM(d), 201812)
         self._test_func(F.toYYYYMM(dt), 201812)
         self._test_func(F.toYYYYMM(dt, "Europe/Athens"), 201812)
@@ -273,7 +280,7 @@ class FuncsTestCase(TestCaseWithData):
         self._test_func(F.toYYYYMMDD(dt), 20181231)
         self._test_func(F.toYYYYMMDD(dt, "Europe/Athens"), 20181231)
         self._test_func(F.toYYYYMMDDhhmmss(d), 20181231000000)
-        self._test_func(F.toYYYYMMDDhhmmss(dt, "Europe/Athens"), 20181231132233)
+        self._test_func(F.toYYYYMMDDhhmmss(dt_utc, "Europe/Athens"), 20181231132233)
         self._test_func(F.toRelativeYearNum(dt), 2018)
         self._test_func(F.toRelativeYearNum(dt, "Europe/Athens"), 2018)
         self._test_func(F.toRelativeMonthNum(dt), 2018 * 12 + 12)
@@ -282,15 +289,13 @@ class FuncsTestCase(TestCaseWithData):
         self._test_func(F.toRelativeWeekNum(dt, "Europe/Athens"), 2557)
         self._test_func(F.toRelativeDayNum(dt), 17896)
         self._test_func(F.toRelativeDayNum(dt, "Europe/Athens"), 17896)
-        self._test_func(F.toRelativeHourNum(dt), 429515)
-        self._test_func(F.toRelativeHourNum(dt, "Europe/Athens"), 429515)
-        self._test_func(F.toRelativeMinuteNum(dt), 25770922)
-        self._test_func(F.toRelativeMinuteNum(dt, "Europe/Athens"), 25770922)
-        self._test_func(F.toRelativeSecondNum(dt), 1546255353)
-        self._test_func(F.toRelativeSecondNum(dt, "Europe/Athens"), 1546255353)
-        self._test_func(F.timeSlot(dt), datetime(2018, 12, 31, 11, 0, 0, tzinfo=pytz.utc))
-        self._test_func(F.timeSlots(dt, 300), [datetime(2018, 12, 31, 11, 0, 0, tzinfo=pytz.utc)])
-        self._test_func(F.formatDateTime(dt, "%D %T", "Europe/Athens"), "12/31/18 13:22:33")
+        self._test_func(F.toRelativeHourNum(dt_utc, "Europe/Athens"), 429515)
+        self._test_func(F.toRelativeMinuteNum(dt_utc, "Europe/Athens"), 25770922)
+        self._test_func(F.toRelativeSecondNum(dt_utc, "Europe/Athens"), 1546255353)
+        dt_slot = datetime(2018, 12, 31, 11, 0, 0)
+        self._test_func(F.timeSlot(dt), dt_slot)
+        self.assertEqual([slot.replace(tzinfo=None) for slot in self._call_func(F.timeSlots(dt, 300))], [dt_slot])
+        self._test_func(F.formatDateTime(dt_utc, "%D %T", "Europe/Athens"), "12/31/18 13:22:33")
         self._test_func(F.addDays(d, 7), date(2019, 1, 7))
         self._test_func(F.addDays(dt, 7, "Europe/Athens"))
         self._test_func(F.addHours(dt, 7, "Europe/Athens"))
@@ -338,7 +343,10 @@ class FuncsTestCase(TestCaseWithData):
         dt = datetime(2018, 12, 31, 11, 22, 33)
         athens_tz = pytz.timezone("Europe/Athens")
         self._test_func(F.toHour(dt), 11)
-        self._test_func(F.toStartOfDay(dt), datetime(2018, 12, 31, 0, 0, 0, tzinfo=pytz.utc))
+        self._test_func(F.toRelativeHourNum(dt), 429515)
+        self._test_func(F.toRelativeMinuteNum(dt), 25770922)
+        self._test_func(F.toRelativeSecondNum(dt), 1546255353)
+        self._test_func(F.toStartOfDay(dt), datetime(2018, 12, 31, 0, 0, 0))
         self._test_func(F.toTime(dt, pytz.utc), datetime(1970, 1, 2, 11, 22, 33, tzinfo=pytz.utc))
         self._test_func(
             F.toTime(dt, "Europe/Athens"),
@@ -356,11 +364,11 @@ class FuncsTestCase(TestCaseWithData):
         self._test_func(F.yesterday(), datetime.utcnow().date() - timedelta(days=1))
         self._test_func(F.toYYYYMMDDhhmmss(dt), 20181231112233)
         self._test_func(F.formatDateTime(dt, "%D %T"), "12/31/18 11:22:33")
-        self._test_func(F.addHours(d, 7), datetime(2018, 12, 31, 7, 0, 0, tzinfo=pytz.utc))
-        self._test_func(F.addMinutes(d, 7), datetime(2018, 12, 31, 0, 7, 0, tzinfo=pytz.utc))
+        self._test_func(F.addHours(d, 7), datetime(2018, 12, 31, 7, 0, 0))
+        self._test_func(F.addMinutes(d, 7), datetime(2018, 12, 31, 0, 7, 0))
 
         actual = self._call_func(F.now())
-        expected = datetime.utcnow().replace(tzinfo=pytz.utc, microsecond=0)
+        expected = datetime.utcnow().replace(microsecond=0)
         self.assertLess((actual - expected).total_seconds(), 1e-3)
 
     def test_type_conversion_functions(self):
@@ -406,30 +414,31 @@ class FuncsTestCase(TestCaseWithData):
         self._test_func(F.parseDateTimeBestEffortOrNull("31/12/2019 10:05AM", "Europe/Athens"))
         self._test_func(F.parseDateTimeBestEffortOrNull("foo"), None)
         self._test_func(F.parseDateTimeBestEffortOrZero("31/12/2019 10:05AM", "Europe/Athens"))
-        self._test_func(F.parseDateTimeBestEffortOrZero("foo"), DateTimeField.class_default)
+        zero = DateTimeField.class_default.astimezone(self.database.server_timezone).replace(tzinfo=None)
+        self._test_func(F.parseDateTimeBestEffortOrZero("foo"), zero)
 
     def test_type_conversion_functions__utc_only(self):
         if self.database.server_timezone != pytz.utc:
             raise unittest.SkipTest("This test must run with UTC as the server timezone")
         self._test_func(
             F.toDateTime("2018-12-31 11:22:33"),
-            datetime(2018, 12, 31, 11, 22, 33, tzinfo=pytz.utc),
+            datetime(2018, 12, 31, 11, 22, 33),
         )
         self._test_func(
             F.toDateTime64("2018-12-31 11:22:33.001", 6),
-            datetime(2018, 12, 31, 11, 22, 33, 1000, tzinfo=pytz.utc),
+            datetime(2018, 12, 31, 11, 22, 33, 1000),
         )
         self._test_func(
             F.parseDateTimeBestEffort("31/12/2019 10:05AM"),
-            datetime(2019, 12, 31, 10, 5, tzinfo=pytz.utc),
+            datetime(2019, 12, 31, 10, 5),
         )
         self._test_func(
             F.parseDateTimeBestEffortOrNull("31/12/2019 10:05AM"),
-            datetime(2019, 12, 31, 10, 5, tzinfo=pytz.utc),
+            datetime(2019, 12, 31, 10, 5),
         )
         self._test_func(
             F.parseDateTimeBestEffortOrZero("31/12/2019 10:05AM"),
-            datetime(2019, 12, 31, 10, 5, tzinfo=pytz.utc),
+            datetime(2019, 12, 31, 10, 5),
         )
 
     def test_string_functions(self):
