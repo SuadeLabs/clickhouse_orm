@@ -4,6 +4,7 @@ import datetime
 import logging
 import unittest
 
+from clickhouse_orm.compiler import ServerCapabilities
 from clickhouse_orm.database import Database, DatabaseException, ServerError
 from clickhouse_orm.engines import (
     CollapsingMergeTree,
@@ -78,11 +79,11 @@ class EnginesTestCase(_EnginesHelperTestCase):
             replica_name="{replica}",
         )
         # In ClickHouse 1.1.54310 custom partitioning key was introduced and new syntax is used
-        if self.database.server_version >= (1, 1, 54310):
-            expected = "ReplicatedMergeTree('/clickhouse/tables/{layer}-{shard}/hits', '{replica}') PARTITION BY (toYYYYMM(`date`)) ORDER BY (date, event_id, event_group) SETTINGS index_granularity=8192"
-        else:
-            expected = "ReplicatedMergeTree('/clickhouse/tables/{layer}-{shard}/hits', '{replica}', date, (date, event_id, event_group), 8192)"
-        self.assertEqual(engine.create_table_sql(self.database), expected)
+        expected = "ReplicatedMergeTree('/clickhouse/tables/{layer}-{shard}/hits', '{replica}') PARTITION BY (toYYYYMM(`date`)) ORDER BY (date, event_id, event_group) SETTINGS index_granularity=8192"
+        self.assertEqual(engine.create_table_sql(self.database.db_name), expected)
+        legacy = ServerCapabilities(has_custom_partitioning=False)
+        expected = "ReplicatedMergeTree('/clickhouse/tables/{layer}-{shard}/hits', '{replica}', date, (date, event_id, event_group), 8192) "
+        self.assertEqual(engine.create_table_sql(self.database.db_name, legacy), expected)
 
     def test_replicated_merge_tree_incomplete(self):
         with self.assertRaises(AssertionError):
@@ -282,14 +283,14 @@ class DistributedTestCase(_EnginesHelperTestCase):
         engine = Distributed("my_cluster")
 
         with self.assertRaises(ValueError) as cm:
-            engine.create_table_sql(self.database)
+            engine.create_table_sql(self.database.db_name)
 
         exc = cm.exception
         self.assertEqual(str(exc), "Cannot create Distributed engine: specify an underlying table")
 
     def test_with_table_name(self):
         engine = Distributed("my_cluster", "foo")
-        sql = engine.create_table_sql(self.database)
+        sql = engine.create_table_sql(self.database.db_name)
         self.assertEqual(sql, "Distributed(`my_cluster`, `test-db`, `foo`)")
 
     class TestModel(SampleModel):

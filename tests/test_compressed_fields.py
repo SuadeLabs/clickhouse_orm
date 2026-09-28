@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime
 import unittest
 
+import pytest
 import pytz
 
 from clickhouse_orm.database import Database
@@ -97,6 +98,7 @@ class CompressedFieldsTestCase(unittest.TestCase):
             {"int64_field": 100, "datetime_field": datetime.datetime(1970, 1, 1, 0, 0, 0, tzinfo=pytz.utc)},
         )
 
+    @pytest.mark.http_only
     def test_confirm_compression_codec(self):
         if self.database.server_version < (19, 17):
             raise unittest.SkipTest("ClickHouse version too old")

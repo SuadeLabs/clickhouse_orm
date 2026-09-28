@@ -4,7 +4,7 @@ build-backend = "flit_core.buildapi"
 
 [project]
 name = "clickhouse_orm"
-version = "3.2.0"
+version = "4.0.0"
 readme = "README.md"
 description = "A simple ORM for working with the Clickhouse database. Maintainance fork of infi.clickhouse_orm."
 authors = [
@@ -31,7 +31,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+native = [
+  "clickhouse-driver>=0.2.7",
+]
 dev = [
+  "clickhouse-driver==0.2.10",
   "docker==7.1.0",
   "pytest==9.0.2",
   "ruff==0.14.14",

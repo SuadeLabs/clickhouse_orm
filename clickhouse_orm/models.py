@@ -7,11 +7,12 @@ from logging import getLogger
 
 import pytz
 
+from .compiler import qualified_name, resolve_ddl_target
 from .engines import Distributed, Merge
-from .fields import Field, StringField
+from .fields import ArrayField, Field, StringField, TupleField
 from .funcs import F
 from .query import QuerySet
-from .utils import NO_VALUE, arg_to_sql, get_subclass_names, parse_tsv
+from .utils import NO_VALUE, arg_to_sql, get_subclass_names, parse_tuple_type, split_tsv, unescape
 
 logger = getLogger("clickhouse_orm")
 
@@ -217,18 +218,16 @@ class ModelBase(type):
         # Arrays
         if db_type.startswith("Array"):
             inner_field = cls.create_ad_hoc_field(db_type[6:-1])
+            if isinstance(inner_field, orm_fields.ArrayField):
+                raise NotImplementedError("No field class for multidimensional arrays - %s" % db_type)
             return orm_fields.ArrayField(inner_field)
-        # Tuples (poor man's version - convert to array)
-        if db_type.startswith("Tuple"):
-            types = [s.strip() for s in db_type[6:-1].split(",")]
-            # newer versions are essentially "named tuples"
-            if any(" " in t for t in types):
-                assert all(" " in t for t in types), "Either all or none of the tuple types must be named - " + db_type
-                types = [t.split(" ", 1)[1] for t in types]
-
-            assert len(set(types)) == 1, "No support for mixed types in tuples - " + db_type
-            inner_field = cls.create_ad_hoc_field(types[0])
-            return orm_fields.ArrayField(inner_field)
+        # Tuples, possibly named (e.g. "Tuple(a UInt8, b String)")
+        if db_type.startswith("Tuple("):
+            elements = parse_tuple_type(db_type)
+            inner_fields = [cls.create_ad_hoc_field(element_type) for _, element_type in elements]
+            if elements and elements[0][0] is not None:
+                return orm_fields.TupleField(list(zip([name for name, _ in elements], inner_fields)))
+            return orm_fields.TupleField(inner_fields)
         # FixedString
         if db_type.startswith("FixedString"):
             length = int(db_type[12:-1])
@@ -351,15 +350,23 @@ class Model(metaclass=ModelBase):
         return cls._has_funcs_as_defaults
 
     @classmethod
-    def create_table_sql(cls, db):
+    def create_table_sql(cls, db_name, capabilities=None):
         """
         Returns the SQL statement for creating a table for this model.
+
+        - `db_name`: name of the database to create the table in.
+        - `capabilities`: a `ServerCapabilities` describing the target server (defaults to a modern server).
         """
-        parts = ["CREATE TABLE IF NOT EXISTS `%s`.`%s` (" % (db.db_name, cls.table_name())]
+        db_name, capabilities = resolve_ddl_target(db_name, capabilities, "Model.create_table_sql")
+        return cls._create_table_sql(db_name, capabilities)
+
+    @classmethod
+    def _create_table_sql(cls, db_name, capabilities):
+        parts = ["CREATE TABLE IF NOT EXISTS %s (" % qualified_name(db_name, cls.table_name())]
         # Fields
         items = []
         for name, field in cls.fields().items():
-            items.append("    %s %s" % (name, field.get_sql(db=db)))
+            items.append("    %s %s" % (name, field.get_sql(capabilities=capabilities)))
         # Constraints
         for c in cls._constraints.values():
             items.append("    %s" % c.create_table_sql())
@@ -369,15 +376,18 @@ class Model(metaclass=ModelBase):
         parts.append(",\n".join(items))
         # Engine
         parts.append(")")
-        parts.append("ENGINE = " + cls.engine.create_table_sql(db))
+        parts.append("ENGINE = " + cls.engine.create_table_sql(db_name, capabilities))
         return "\n".join(parts)
 
     @classmethod
-    def drop_table_sql(cls, db):
+    def drop_table_sql(cls, db_name):
         """
         Returns the SQL command for deleting this model's table.
+
+        - `db_name`: name of the database containing the table.
         """
-        return "DROP TABLE IF EXISTS `%s`.`%s`" % (db.db_name, cls.table_name())
+        db_name, _ = resolve_ddl_target(db_name, None, "Model.drop_table_sql")
+        return "DROP TABLE IF EXISTS %s" % qualified_name(db_name, cls.table_name())
 
     @classmethod
     def from_tsv(cls, line, field_names, timezone_in_use=pytz.utc, database=None):
@@ -387,15 +397,20 @@ class Model(metaclass=ModelBase):
 
         - `line`: the TSV-formatted data.
         - `field_names`: names of the model fields in the data.
-        - `timezone_in_use`: the timezone to use when parsing dates and datetimes. Some fields use their own timezones.
+        - `timezone_in_use`: passed to each field's `to_python`. Datetime fields ignore it: naive values stay naive,
+          unless the field has its own timezone.
         - `database`: if given, sets the database that this instance belongs to.
         """
-        values = iter(parse_tsv(line))
+        values = iter(split_tsv(line))
         kwargs = {}
         for name in field_names:
             field = getattr(cls, name)
             field_timezone = getattr(field, "timezone", None) or timezone_in_use
-            kwargs[name] = field.to_python(next(values), field_timezone)
+            # Arrays and tuples are written in their quoted form, which parse_array unescapes, rather than escaped
+            # for TSV
+            value = next(values)
+            quoted = isinstance(field, (ArrayField, TupleField))
+            kwargs[name] = field.to_python(value if quoted else unescape(value), field_timezone)
 
         obj = cls(**kwargs)
         if database is not None:
@@ -455,6 +470,8 @@ class Model(metaclass=ModelBase):
     def objects_in(cls, database):
         """
         Returns a `QuerySet` for selecting instances of this model class.
+
+        - `database`: the `Database` (or any other `Executor`) which runs the queries.
         """
         return QuerySet(cls, database)
 
@@ -485,15 +502,12 @@ class Model(metaclass=ModelBase):
 
 class BufferModel(Model):
     @classmethod
-    def create_table_sql(cls, db):
-        """
-        Returns the SQL statement for creating a table for this model.
-        """
+    def _create_table_sql(cls, db_name, capabilities):
         parts = [
-            "CREATE TABLE IF NOT EXISTS `%s`.`%s` AS `%s`.`%s`"
-            % (db.db_name, cls.table_name(), db.db_name, cls.engine.main_model.table_name())
+            "CREATE TABLE IF NOT EXISTS %s AS %s"
+            % (qualified_name(db_name, cls.table_name()), qualified_name(db_name, cls.engine.main_model.table_name()))
         ]
-        engine_str = cls.engine.create_table_sql(db)
+        engine_str = cls.engine.create_table_sql(db_name, capabilities)
         parts.append(engine_str)
         return " ".join(parts)
 
@@ -511,19 +525,16 @@ class MergeModel(Model):
     _table = StringField(readonly=True)
 
     @classmethod
-    def create_table_sql(cls, db):
-        """
-        Returns the SQL statement for creating a table for this model.
-        """
+    def _create_table_sql(cls, db_name, capabilities):
         assert isinstance(cls.engine, Merge), "engine must be an instance of engines.Merge"
-        parts = ["CREATE TABLE IF NOT EXISTS `%s`.`%s` (" % (db.db_name, cls.table_name())]
+        parts = ["CREATE TABLE IF NOT EXISTS %s (" % qualified_name(db_name, cls.table_name())]
         cols = []
         for name, field in cls.fields().items():
             if name != "_table":
-                cols.append("    %s %s" % (name, field.get_sql(db=db)))
+                cols.append("    %s %s" % (name, field.get_sql(capabilities=capabilities)))
         parts.append(",\n".join(cols))
         parts.append(")")
-        parts.append("ENGINE = " + cls.engine.create_table_sql(db))
+        parts.append("ENGINE = " + cls.engine.create_table_sql(db_name, capabilities))
         return "\n".join(parts)
 
 
@@ -598,17 +609,15 @@ class DistributedModel(Model):
         cls.engine.table = storage_models[0]
 
     @classmethod
-    def create_table_sql(cls, db):
-        """
-        Returns the SQL statement for creating a table for this model.
-        """
+    def _create_table_sql(cls, db_name, capabilities):
         assert isinstance(cls.engine, Distributed), "engine must be engines.Distributed instance"
 
         cls.fix_engine_table()
 
         parts = [
-            f"CREATE TABLE IF NOT EXISTS `{db.db_name}`.`{cls.table_name()}` AS `{db.db_name}`.`{cls.engine.table_name}`",
-            "ENGINE = " + cls.engine.create_table_sql(db),
+            "CREATE TABLE IF NOT EXISTS %s AS %s"
+            % (qualified_name(db_name, cls.table_name()), qualified_name(db_name, cls.engine.table_name)),
+            "ENGINE = " + cls.engine.create_table_sql(db_name, capabilities),
         ]
         return "\n".join(parts)
 

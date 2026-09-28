@@ -1,6 +1,96 @@
 Change Log
 ==========
 
+v4.0.0
+----------
+- All HTTP I/O now goes through a pluggable `Driver` (`clickhouse_orm.driver`); `Database.driver` defaults to `RequestsDriver`
+- `DatabaseException` and `ServerError` moved to `clickhouse_orm.exceptions` (still importable from `clickhouse_orm.database`)
+- `Database.request_session` is now a read-only property proxying `Database.driver.session`
+- INSERT statements are now logged when `log_statements=True`
+- bugfix: `Database.server_version` no longer drops the final version component
+- DDL generation no longer needs a live `Database`: `Model.create_table_sql(db_name, capabilities=None)`,
+  `Model.drop_table_sql(db_name)`, `Engine.create_table_sql(db_name, capabilities=None)` and
+  `Field.get_sql(with_default_expression=True, *, capabilities=None)`
+- New `ServerCapabilities` (`clickhouse_orm.compiler`) describing optional server features; `Database.capabilities`
+  is derived from the server version. `Database.has_codec_support` / `has_low_cardinality_support` are now read-only
+  properties proxying it
+- `$db` / `$table` substitution moved to `clickhouse_orm.compiler.substitute`; migrations use qualified table names
+- bugfix: pre-1.1.54310 `MergeTree` syntax raised a `TypeError`
+- Serialisation moved into a pluggable `Codec` (`clickhouse_orm.codec`); `Database.codec` defaults to `TSVCodec`,
+  which owns the wire formats, TSV header parsing and insert batching
+- `insert(batch_size=n)` now sends exactly `n` rows per chunk (previously the first chunk held one row fewer)
+- `QuerySet` no longer depends on `Database`: it runs its SQL through any `Executor` (`clickhouse_orm.executor`), a
+  protocol with `select`, `raw` and `count` which `Database` implements. `Model.objects_in` accepts any executor,
+  so query building can be unit-tested without a server. `QuerySet._database` remains as an alias of `_executor`
+- Query parameters: `Database.select`, `select_rows`, `raw`, `count` and `paginate` accept `params` for ClickHouse's
+  `{name:Type}` placeholders; values are encoded by `clickhouse_orm.params.format_param` (or passed pre-encoded as
+  `EncodedParam`) and sent by the driver (`Driver.send(..., params=...)`, as `param_<name>` URL parameters over HTTP)
+- `QuerySet.parameterized()` binds filter values and string / date / datetime function arguments as query parameters
+  instead of inlining them; `QuerySet.as_sql_with_params()` returns the `(sql, params)` pair. Executors receive
+  `params` only from parameterized querysets
+- New `Database.select_rows(query, settings=None)` returning a `RowResult` of plain tuples plus `(name, type)`
+  column metadata, with values typed like `clickhouse_driver` (see "Reading Rows" in the docs)
+- Pluggable drivers: `Database(db_name, driver=...)` uses any `Driver` subclass instead of the default
+  `RequestsDriver` (see "Drivers" in the docs). A driver's `codec` attribute selects its `Codec`
+- New optional `NativeDriver` (`clickhouse_orm.native`) using the native TCP protocol via `clickhouse-driver`;
+  install with `pip install clickhouse_orm[native]`
+- `scripts/benchmark.py` compares the drivers for bulk inserts and selects (results under "Performance" in the docs)
+- The test suite can be run against the native driver with `pytest --driver=native`
+- CI tests against ClickHouse 21.3, 25.8 and 26.8 (20.8 is no longer tested). Locally, the version of the temporary
+  test container can be chosen with `CLICKHOUSE_VERSION` (default 25.8)
+- `Model.create_ad_hoc_field` raises `NotImplementedError` for multidimensional arrays (e.g. `Array(Array(String))`)
+  rather than failing an assertion, so `get_model_for_table` reports them like other unsupported types
+- New `TupleField` for `Tuple` columns, named or not (see "Working with tuple fields" in the docs). Values are Python
+  tuples, whose elements can be of any type (including arrays and tuples), and arrays of tuples are supported. Query
+  results, `get_model_for_table` and system models now read tuple columns of mixed types (e.g. `system.parts`,
+  `system.tables` and `system.settings_changes`, which previously could not be loaded)
+- `select_rows` parses `Tuple` values into tuples and nested arrays into nested lists (with the default driver too),
+  matching `clickhouse_driver`
+- `parse_array` handles nested arrays, tuples and maps (returned as their text), and single-element tuples such as
+  `(1,)`. New `parse_tuple_type` and `split_type_args` helpers in `clickhouse_orm.utils`
+- bugfix: deep-copying a `QuerySet` (e.g. when used as a subquery filter) no longer copies its database
+- bugfix: `select_rows` array elements are now typed like `clickhouse_driver` (e.g. enum names, naive datetimes)
+- bugfix: arrays of `Nullable` fields containing `None` could not be inserted or read (NULLs inside arrays are now
+  written as the `NULL` keyword, in TSV and SQL alike)
+- bugfix: array elements containing quotes or backslashes were corrupted when read, since the TSV codec unescaped
+  array cells which ClickHouse does not escape for TSV. `parse_array` now unescapes quoted elements, and returns
+  `None` for `NULL`. `select_rows` returns `Tuple` / `Map` text exactly as ClickHouse writes it
+
+**Deprecations / backwards incompatible changes**
+
+- Passing a `Database` to `create_table_sql`, `drop_table_sql`, `Engine.create_table_sql` or `Field.get_sql(db=...)`
+  still works but emits a `DeprecationWarning`
+- Custom subclasses should override the new internal hooks instead of the public methods:
+  `Model._create_table_sql(db_name, capabilities)`, `Engine._create_table_sql(db_name, capabilities)` and
+  `Field._get_sql(with_default_expression, capabilities)`. Overrides of the old public methods that expect a
+  `Database` argument will no longer be called with one
+- `Codec` API: `encode_inserts(model_class, instances, batch_size)` replaces `encode` / `insert_format` (which remain
+  on `TSVCodec`), `decode` / `decode_rows` receive the driver response instead of lines, and `select_format` may be
+  `None`. `Database.codec` is now taken from `Database.driver.codec`
+- `Database.db_url` is `None` when a custom driver is given; passing `db_url`, `username` or `password` together
+  with `driver` raises a `ValueError`
+- **Datetime semantics (major breaking change).** Naive datetimes are now wall-clock times in the column's timezone,
+  as in ClickHouse and `clickhouse_driver`, instead of being treated as UTC (see "DateTimeField and Time Zones" in
+  the docs):
+  - `DateTimeField` / `DateTime64Field` without a `timezone` keep naive values naive on assignment (previously they
+    were converted to aware UTC). Fields with a `timezone` localize naive values to it (previously to UTC)
+  - Columns without a timezone (e.g. `DateTime`) are now read as naive datetimes in the server's timezone, by
+    `select`, querysets and `select_rows` alike and with either driver. Columns with a timezone are read as aware
+    values in the column's timezone. The column type decides, not the model field
+  - Naive values are written as wall-clock text (`'2020-06-11 04:00:00'`) rather than as a UTC Unix timestamp, in
+    inserts, `to_db_string`, function arguments (`toDateTime('...')`) and query parameters, so ClickHouse interprets
+    them in the column's timezone. Aware values are still written as Unix timestamps
+  - `DateTimeField.to_python` ignores `timezone_in_use`; custom fields still receive the server timezone
+  - Aware values (including the default, the Unix epoch) inserted into columns without a timezone are read back as
+    naive server wall-clock times
+  - To migrate: on a UTC server, replace comparisons with aware UTC values by naive ones (e.g.
+    `dt.replace(tzinfo=None)`), or give the field a timezone (e.g. `DateTimeField(timezone='UTC')`, which changes the
+    column type to `DateTime('UTC')`) to keep reading aware values. On other servers, check any code which relied
+    on naive values meaning UTC
+- `Tuple` columns in query results are now read as tuples by `TupleField` (previously, tuples whose elements all had
+  the same type were read as lists by an `ArrayField`, and other tuples could not be read). This includes function
+  results, e.g. `IPv4CIDRToRange` now returns a tuple of addresses rather than a list
+
 v3.2.0
 ------
 - bugfix: revert changes to session handling
