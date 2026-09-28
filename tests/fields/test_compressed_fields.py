@@ -123,6 +123,7 @@ class CompressedFieldsTestCase(unittest.TestCase):
             },
         )
 
+    @pytest.mark.http_only
     def test_confirm_compression_codec(self):
         if self.database.server_version < (19, 17):
             raise unittest.SkipTest("ClickHouse version too old")

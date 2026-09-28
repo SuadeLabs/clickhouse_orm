@@ -32,7 +32,7 @@ class SimpleFieldsTest(unittest.TestCase):
         f = DateTimeField()
         for value in self.dates:
             dt = f.to_python(value, pytz.utc)
-            self.assertTrue(dt.tzinfo)
+            self.assertIsInstance(dt, datetime)
             # Verify that conversion to and from db string does not change value
             dt2 = f.to_python(f.to_db_string(dt, quote=False), pytz.utc)
             self.assertEqual(dt, dt2)
@@ -67,7 +67,7 @@ class SimpleFieldsTest(unittest.TestCase):
             "2017-07-26 13:31:05.1+0500",
         ]:
             dt = f.to_python(value, pytz.utc)
-            self.assertTrue(dt.tzinfo)
+            self.assertIsInstance(dt, datetime)
             # Verify that conversion to and from db string does not change value
             dt2 = f.to_python(f.to_db_string(dt, quote=False), pytz.utc)
             self.assertEqual(dt, dt2)
@@ -122,8 +122,9 @@ class SimpleFieldsTest(unittest.TestCase):
         # Verify that conversion of timezone-aware datetime is correct
         f = DateTimeField()
         utc_value = datetime(2017, 7, 26, 8, 31, 5, tzinfo=pytz.UTC)
+        # Values without an offset are naive
+        self.assertEqual(f.to_python("2017-07-26T08:31:05", pytz.utc), utc_value.replace(tzinfo=None))
         for value in (
-            "2017-07-26T08:31:05",
             "2017-07-26T08:31:05Z",
             "2017-07-26T11:31:05+03",
             "2017-07-26 11:31:05+0300",

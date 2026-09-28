@@ -12,6 +12,15 @@ To install clickhouse_orm:
 
     pip install clickhouse_orm
 
+To use ClickHouse's native protocol (see [Drivers](models_and_databases.md#drivers)), install the `native` extra:
+
+    pip install clickhouse_orm[native]
+
+To query with [SQLAlchemy Core](sqlalchemy_core.md#sqlalchemy-core-querying-optional) as an alternative to
+`QuerySet`, install the `sqlalchemy` extra:
+
+    pip install clickhouse_orm[sqlalchemy]
+
 ---
 
 [Table of Contents](toc.md) | [Models and Databases >>](models_and_databases.md)

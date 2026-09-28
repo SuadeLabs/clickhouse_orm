@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import unittest
 
-from clickhouse_orm.database import Database
 from clickhouse_orm.engines import MergeTree
 from clickhouse_orm.fields import DateField, Float32Field, Int32Field, StringField
 from clickhouse_orm.models import Model
@@ -18,10 +17,9 @@ class InheritanceTestCase(unittest.TestCase):
         self.assertFieldNames(Model2, ["date_field", "int_field", "float_field"])
 
     def test_create_table_sql(self):
-        default_db = Database("default")
-        sql1 = ParentModel.create_table_sql(default_db)
-        sql2 = Model1.create_table_sql(default_db)
-        sql3 = Model2.create_table_sql(default_db)
+        sql1 = ParentModel.create_table_sql("default")
+        sql2 = Model1.create_table_sql("default")
+        sql3 = Model2.create_table_sql("default")
         self.assertNotEqual(sql1, sql2)
         self.assertNotEqual(sql1, sql3)
         self.assertNotEqual(sql2, sql3)

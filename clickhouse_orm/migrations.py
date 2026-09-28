@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 
+from .compiler import qualified_name
 from .engines import MergeTree
 from .fields import DateField, StringField
 from .models import BufferModel, Model
@@ -31,11 +32,14 @@ class ModelOperation(Operation):
         self.model_class = model_class
         self.table_name = model_class.table_name()
 
+    def _qualified_table_name(self, database):
+        return qualified_name(database.db_name, self.table_name)
+
     def _alter_table(self, database, cmd):
         """
         Utility for running ALTER TABLE commands.
         """
-        cmd = "ALTER TABLE $db.`%s` %s" % (self.table_name, cmd)
+        cmd = "ALTER TABLE %s %s" % (self._qualified_table_name(database), cmd)
         logger.debug(cmd)
         database.raw(cmd)
 
@@ -63,7 +67,7 @@ class AlterTable(ModelOperation):
     """
 
     def _get_table_fields(self, database):
-        query = "DESC `%s`.`%s`" % (database.db_name, self.table_name)
+        query = "DESC %s" % self._qualified_table_name(database)
         return [(row.name, row.type) for row in database.select(query)]
 
     def apply(self, database):
@@ -86,7 +90,7 @@ class AlterTable(ModelOperation):
             is_regular_field = not (field.materialized or field.alias)
             if name not in table_fields:
                 logger.info("        Add column %s", name)
-                cmd = "ADD COLUMN %s %s" % (name, field.get_sql(db=database))
+                cmd = "ADD COLUMN %s %s" % (name, field.get_sql(capabilities=database.capabilities))
                 if is_regular_field:
                     if prev_name:
                         cmd += " AFTER %s" % prev_name
@@ -104,7 +108,7 @@ class AlterTable(ModelOperation):
         # Secondly, MATERIALIZED and ALIAS fields are always at the end of the DESC, so we can't expect them to save
         # attribute position. Watch https://github.com/Infinidat/clickhouse_orm/issues/47
         model_fields = {
-            name: field.get_sql(with_default_expression=False, db=database)
+            name: field.get_sql(with_default_expression=False, capabilities=database.capabilities)
             for name, field in self.model_class.fields().items()
         }
         for field_name, field_sql in self._get_table_fields(database):
@@ -174,7 +178,7 @@ class AlterConstraints(ModelOperation):
         """
         import re
 
-        table_def = database.raw("SHOW CREATE TABLE $db.`%s`" % self.table_name)
+        table_def = database.raw("SHOW CREATE TABLE %s" % self._qualified_table_name(database))
         matches = re.findall(r"\sCONSTRAINT\s+`?(.+?)`?\s+CHECK\s", table_def)
         return set(matches)
 
@@ -215,7 +219,7 @@ class AlterIndexes(ModelOperation):
         # Reindex
         if self.reindex:
             logger.info("        Build indexes on table")
-            database.raw("OPTIMIZE TABLE $db.`%s` FINAL" % self.table_name)
+            database.raw("OPTIMIZE TABLE %s FINAL" % self._qualified_table_name(database))
 
     def _get_index_names(self, database):
         """
@@ -223,7 +227,7 @@ class AlterIndexes(ModelOperation):
         """
         import re
 
-        table_def = database.raw("SHOW CREATE TABLE $db.`%s`" % self.table_name)
+        table_def = database.raw("SHOW CREATE TABLE %s" % self._qualified_table_name(database))
         matches = re.findall(r"\sINDEX\s+`?(.+?)`?\s+", table_def)
         return set(matches)
 

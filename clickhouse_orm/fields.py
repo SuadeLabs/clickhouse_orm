@@ -10,6 +10,7 @@ from uuid import UUID
 import pytz
 from pytz import BaseTzInfo
 
+from .compiler import resolve_ddl_target
 from .funcs import F, FunctionOperatorsMixin
 from .utils import comma_join, escape, get_subclass_names, parse_array, string_or_func
 
@@ -87,27 +88,45 @@ class Field(FunctionOperatorsMixin):
         """
         return escape(value, quote)
 
-    def get_sql(self, with_default_expression=True, db=None):
+    def get_sql(self, with_default_expression=True, db=None, *, capabilities=None):
         """
         Returns an SQL expression describing the field (e.g. for CREATE TABLE).
 
         - `with_default_expression`: If True, adds default value to sql.
             It doesn't affect fields with alias and materialized values.
-        - `db`: Database, used for checking supported features.
+        - `db`: deprecated, pass `capabilities` instead.
+        - `capabilities`: a `ServerCapabilities` used for checking supported features.
+          When omitted, optional features (codecs, LowCardinality) are not used.
         """
+        if db is not None:
+            _, capabilities = resolve_ddl_target(db, capabilities, "Field.get_sql")
+        return self._get_sql(with_default_expression, capabilities)
+
+    def _get_sql(self, with_default_expression, capabilities):
         sql = self.db_type
         args = self.get_db_type_args()
         if args:
             sql += "(%s)" % comma_join(args)
         if with_default_expression:
-            sql += self._extra_params(db)
+            sql += self._extra_params(capabilities)
         return sql
 
     def get_db_type_args(self):
         """Returns field type arguments"""
         return []
 
-    def _extra_params(self, db):
+    def _param_type(self):
+        """The ClickHouse type used for query parameters holding a (non-NULL) value of this field."""
+        return self._get_sql(False, None)
+
+    def _is_nullable(self):
+        return False
+
+    def _param_text(self, value):
+        """Encodes a value (already converted by `to_python`) as the text of a query parameter."""
+        return self.to_db_string(value, quote=False)
+
+    def _extra_params(self, capabilities):
         sql = ""
         if self.alias:
             sql += " ALIAS %s" % string_or_func(self.alias)
@@ -118,7 +137,7 @@ class Field(FunctionOperatorsMixin):
         elif self.default:
             default = self.to_db_string(self.default)
             sql += " DEFAULT %s" % default
-        if self.codec and db and db.has_codec_support and not self.alias:
+        if self.codec and capabilities and capabilities.has_codec_support and not self.alias:
             sql += " CODEC(%s)" % self.codec
         return sql
 
@@ -214,31 +233,49 @@ class DateTimeField(Field):
         return args
 
     def to_python(self, value, timezone_in_use):
+        """
+        Naive values (datetimes, dates and strings without an offset) are wall-clock times in the column's timezone:
+        they are localized to the field's `timezone` if it has one, and are otherwise kept naive (ClickHouse then
+        interprets them in the server's timezone). Aware datetimes are kept as they are, and Unix timestamps are
+        returned in UTC. `timezone_in_use` is ignored.
+        """
         if isinstance(value, datetime.datetime):
-            return value if value.tzinfo else value.replace(tzinfo=pytz.utc)
+            return self._localize(value)
         if isinstance(value, datetime.date):
-            return datetime.datetime(value.year, value.month, value.day, tzinfo=pytz.utc)
+            return self._localize(datetime.datetime(value.year, value.month, value.day))
         if isinstance(value, int):
-            return datetime.datetime.utcfromtimestamp(value).replace(tzinfo=pytz.utc)
+            return self._from_timestamp(value)
         if isinstance(value, str):
             if value == "0000-00-00 00:00:00":
                 return self.class_default
             if len(value) == 10:
                 try:
-                    value = int(value)
-                    return datetime.datetime.utcfromtimestamp(value).replace(tzinfo=pytz.utc)
+                    return self._from_timestamp(int(value))
                 except ValueError:
                     pass
-            # left the date naive in case of no tzinfo set
-            dt = datetime.datetime.fromisoformat(value)
-
-            # convert naive to aware
-            if dt.tzinfo is None or dt.tzinfo.utcoffset(dt) is None:
-                dt = timezone_in_use.localize(dt)
-            return dt
+            return self._localize(datetime.datetime.fromisoformat(value))
         raise ValueError("Invalid value for %s - %r" % (self.__class__.__name__, value))
 
+    def _localize(self, value):
+        if self.timezone is None or (value.tzinfo is not None and value.utcoffset() is not None):
+            return value
+        return self.timezone.localize(value.replace(tzinfo=None))
+
+    @staticmethod
+    def _from_timestamp(timestamp):
+        return datetime.datetime.fromtimestamp(timestamp, pytz.utc)
+
+    @staticmethod
+    def _is_naive(value):
+        return value.tzinfo is None or value.utcoffset() is None
+
     def to_db_string(self, value, quote=True):
+        """
+        Naive values are written as wall-clock times (`YYYY-MM-DD HH:MM:SS`), which ClickHouse interprets in the
+        column's timezone, and aware values as Unix timestamps.
+        """
+        if self._is_naive(value):
+            return escape(value.isoformat(" ", "seconds"), quote)
         return escape("%010d" % timegm(value.utctimetuple()), quote)
 
 
@@ -260,13 +297,19 @@ class DateTime64Field(DateTimeField):
 
     def to_db_string(self, value, quote=True):
         """
-        Returns the field's value prepared for writing to the database
-
-        Returns string in 0000000000.000000 format, where remainder digits count is equal to precision
+        Naive values are written as wall-clock times (`YYYY-MM-DD HH:MM:SS.ffffff`), which ClickHouse interprets in
+        the column's timezone, and aware values as Unix timestamps (`0000000000.000000`), with as many fractional
+        digits as the field's precision.
         """
+        precision = self.precision or 0
+        if self._is_naive(value):
+            text = value.isoformat(" ", "seconds")
+            if precision:
+                text += "." + ("%06d" % value.microsecond)[:precision].ljust(precision, "0")
+            return escape(text, quote)
         return escape(
             "{timestamp:0{width}.{precision}f}".format(
-                timestamp=value.timestamp(), width=11 + self.precision, precision=self.precision
+                timestamp=value.timestamp(), width=11 + precision, precision=precision
             ),
             quote,
         )
@@ -275,16 +318,15 @@ class DateTime64Field(DateTimeField):
         try:
             return super().to_python(value, timezone_in_use)
         except ValueError:
-            if isinstance(value, (int, float)):
-                return datetime.datetime.utcfromtimestamp(value).replace(tzinfo=pytz.utc)
+            if isinstance(value, float):
+                return self._from_timestamp(value)
             if isinstance(value, str):
                 left_part = value.split(".")[0]
                 if left_part == "0000-00-00 00:00:00":
                     return self.class_default
                 if len(left_part) == 10:
                     try:
-                        value = float(value)
-                        return datetime.datetime.utcfromtimestamp(value).replace(tzinfo=pytz.utc)
+                        return self._from_timestamp(float(value))
                     except ValueError:
                         pass
             raise
@@ -527,12 +569,20 @@ class ArrayField(Field):
             self.inner_field.validate(v)
 
     def to_db_string(self, value, quote=True):
-        array = [self.inner_field.to_db_string(v, quote=True) for v in value]
-        return "[" + comma_join(array) + "]"
+        # The same text is used in SQL, TSV and query parameters: elements are always quoted, since arrays are not
+        # escaped for TSV, and NULLs are written as the NULL keyword (rather than \N)
+        items = [self.inner_field.to_db_string(v, quote=True) for v in value]
+        return "[" + comma_join("NULL" if item == "\\N" else item for item in items) + "]"
 
-    def get_sql(self, with_default_expression=True, db=None):
-        sql = "Array(%s)" % self.inner_field.get_sql(with_default_expression=False, db=db)
-        if with_default_expression and self.codec and db and db.has_codec_support:
+    def _param_type(self):
+        inner_type = self.inner_field._param_type()
+        if self.inner_field._is_nullable():
+            inner_type = "Nullable(%s)" % inner_type
+        return "Array(%s)" % inner_type
+
+    def _get_sql(self, with_default_expression, capabilities):
+        sql = "Array(%s)" % self.inner_field._get_sql(False, capabilities)
+        if with_default_expression and self.codec and capabilities and capabilities.has_codec_support:
             sql += " CODEC(%s)" % self.codec
         return sql
 
@@ -617,10 +667,17 @@ class NullableField(Field):
             return "\\N"
         return self.inner_field.to_db_string(value, quote=quote)
 
-    def get_sql(self, with_default_expression=True, db=None):
-        sql = "Nullable(%s)" % self.inner_field.get_sql(with_default_expression=False, db=db)
+    def _is_nullable(self):
+        return True
+
+    def _param_type(self):
+        # NULL values are never bound as parameters, so the inner type suffices
+        return self.inner_field._param_type()
+
+    def _get_sql(self, with_default_expression, capabilities):
+        sql = "Nullable(%s)" % self.inner_field._get_sql(False, capabilities)
         if with_default_expression:
-            sql += self._extra_params(db)
+            sql += self._extra_params(capabilities)
         return sql
 
 
@@ -648,16 +705,22 @@ class LowCardinalityField(Field):
     def to_db_string(self, value, quote=True):
         return self.inner_field.to_db_string(value, quote=quote)
 
-    def get_sql(self, with_default_expression=True, db=None):
-        if db and db.has_low_cardinality_support:
-            sql = "LowCardinality(%s)" % self.inner_field.get_sql(with_default_expression=False)
+    def _is_nullable(self):
+        return self.inner_field._is_nullable()
+
+    def _param_type(self):
+        return self.inner_field._param_type()
+
+    def _get_sql(self, with_default_expression, capabilities):
+        if capabilities and capabilities.has_low_cardinality_support:
+            sql = "LowCardinality(%s)" % self.inner_field._get_sql(False, None)
         else:
-            sql = self.inner_field.get_sql(with_default_expression=False)
+            sql = self.inner_field._get_sql(False, None)
             logger.warning(
                 f"LowCardinalityField not supported on clickhouse-server version < 19.0 using {self.inner_field.__class__.__name__} as fallback"
             )
         if with_default_expression:
-            sql += self._extra_params(db)
+            sql += self._extra_params(capabilities)
         return sql
 
 

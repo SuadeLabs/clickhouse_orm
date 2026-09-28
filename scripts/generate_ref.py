@@ -131,12 +131,13 @@ def all_subclasses(cls):
 
 
 if __name__ == "__main__":
-    from clickhouse_orm import database, engines, fields, funcs, models, query, system_models
+    from clickhouse_orm import database, driver, engines, fields, funcs, models, native, query, system_models
 
     print("Class Reference")
     print("===============")
     print()
     module_doc([database.Database, database.DatabaseException])
+    module_doc([driver.Driver, driver.RequestsDriver, native.NativeDriver])
     module_doc(
         [models.Model, models.BufferModel, models.MergeModel, models.DistributedModel, models.Constraint, models.Index]
     )

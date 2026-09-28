@@ -10,14 +10,14 @@ clickhouse_orm.database
 Database instances connect to a specific ClickHouse database for running queries,
 inserting data and other operations.
 
-#### Database(db_name, db_url="http://localhost:8123/", username=None, password=None, readonly=False, autocreate=True, timeout=60, verify_ssl_cert=True, log_statements=False)
+#### Database(db_name, db_url=None, username=None, password=None, readonly=False, autocreate=True, timeout=60, verify_ssl_cert=True, log_statements=False, driver=None)
 
 
 Initializes a database instance. Unless it's readonly, the database will be
 created on the ClickHouse server if it does not already exist.
 
 - `db_name`: name of the database to connect to.
-- `db_url`: URL of the ClickHouse server.
+- `db_url`: URL of the ClickHouse server's HTTP interface.
 - `username`: optional connection credentials.
 - `password`: optional connection credentials.
 - `readonly`: use a read-only connection.
@@ -25,6 +25,8 @@ created on the ClickHouse server if it does not already exist.
 - `timeout`: the connection timeout in seconds.
 - `verify_ssl_cert`: whether to verify the server's certificate when connecting via HTTPS.
 - `log_statements`: when True, all database statements are logged.
+- `driver`: the `Driver` used to communicate with the server. Defaults to a `RequestsDriver` configured by
+  `db_url`, `username`, `password`, `timeout` and `verify_ssl_cert`, which only apply to the default driver.
 
 
 #### add_setting(name, value)
@@ -37,13 +39,14 @@ The name must be string, and the value is converted to string in case
 it isn't. To remove a setting, pass `None` as the value.
 
 
-#### count(model_class, conditions=None)
+#### count(model_class, conditions=None, params=None)
 
 
 Counts the number of records in the model's table.
 
 - `model_class`: the model to count.
 - `conditions`: optional SQL conditions (contents of the WHERE clause).
+- `params`: values for `{name:Type}` placeholders in the conditions.
 
 
 #### create_database()
@@ -107,7 +110,7 @@ Executes schema migrations.
 - `up_to` - number of the last migration to apply.
 
 
-#### paginate(model_class, order_by, page_num=1, page_size=100, conditions=None, settings=None)
+#### paginate(model_class, order_by, page_num=1, page_size=100, conditions=None, settings=None, params=None)
 
 
 Selects records and returns a single page of model instances.
@@ -119,12 +122,13 @@ Selects records and returns a single page of model instances.
 - `page_size`: number of records to return per page.
 - `conditions`: optional SQL conditions (contents of the WHERE clause).
 - `settings`: query settings to send as HTTP GET parameters
+- `params`: values for `{name:Type}` placeholders in the conditions
 
 The result is a namedtuple containing `objects` (list), `number_of_objects`,
 `pages_total`, `number` (of the current page), and `page_size`.
 
 
-#### raw(query, settings=None, stream=False)
+#### raw(query, settings=None, stream=False, params=None)
 
 
 Performs a query and returns its output as text.
@@ -132,9 +136,10 @@ Performs a query and returns its output as text.
 - `query`: the SQL query to execute.
 - `settings`: query settings to send as HTTP GET parameters
 - `stream`: if true, the HTTP response from ClickHouse will be streamed.
+- `params`: values for `{name:Type}` placeholders in the query
 
 
-#### select(query, model_class=None, settings=None)
+#### select(query, model_class=None, settings=None, params=None)
 
 
 Performs a query and returns a generator of model instances.
@@ -143,6 +148,23 @@ Performs a query and returns a generator of model instances.
 - `model_class`: the model class matching the query's table,
   or `None` for getting back instances of an ad-hoc model.
 - `settings`: query settings to send as HTTP GET parameters
+- `params`: values for `{name:Type}` placeholders in the query (see "Query Parameters")
+
+
+#### select_rows(query, settings=None, params=None)
+
+
+Performs a query and returns a `RowResult`: its `columns` attribute lists the `(name, type)`
+of each column, and iterating over it yields each row as a plain tuple.
+
+Unlike `select`, no model instances are created. Values use the same Python types as
+`clickhouse_driver` (e.g. `DateTime` columns without a timezone are naive datetimes in the
+server's timezone, and enums are returned as their names). Rows are streamed from the server,
+so the result can only be iterated once.
+
+- `query`: the SQL query to execute.
+- `settings`: query settings to send as HTTP GET parameters
+- `params`: values for `{name:Type}` placeholders in the query
 
 
 ### DatabaseException
@@ -151,6 +173,102 @@ Extends Exception
 
 
 Raised when a database operation fails.
+
+clickhouse_orm.driver
+---------------------
+
+### Driver
+
+Extends ABC
+
+
+Base class for ClickHouse drivers. Subclasses implement `send`; see "Custom Drivers" in the documentation.
+
+A driver is paired with the `codec` that understands its responses and produces its insert data. The default,
+`TSVCodec`, works with drivers whose responses provide `text` and `iter_lines()` (see `DriverResponse`) and which
+accept insert data as bytes.
+
+#### scalar(query, data=None, settings=None, params=None)
+
+Sends a query to the ClickHouse server and returns the response text, stripped of whitespace.
+
+
+#### send(query, data=None, settings=None, stream=False, params=None)
+
+
+Sends a query to the ClickHouse server and returns the response.
+
+- `query`: the SQL statement to execute.
+- `data`: optional payload for the statement (e.g. rows for an INSERT statement), as produced by
+  `self.codec.encode_inserts`. For `TSVCodec` it is an iterable of byte chunks, for streaming large inserts.
+- `settings`: query settings to send along with the query. `Database` also passes the name of its database
+  here as `database` (once the database exists), which the driver must use for unqualified table names.
+- `stream`: if true, the response body is streamed rather than read eagerly (drivers may ignore this).
+- `params`: values for the query's `{name:Type}` placeholders, already encoded in ClickHouse's
+  escaped text format (see `clickhouse_orm.params.format_param`).
+
+Raises `ServerError` if the server reports an error.
+
+
+### RequestsDriver
+
+Extends Driver
+
+A ClickHouse driver that uses the HTTP interface via the requests library.
+
+#### RequestsDriver(url, username=None, password=None, timeout=60, verify_ssl_cert=True)
+
+
+#### scalar(query, data=None, settings=None, params=None)
+
+Sends a query to the ClickHouse server and returns the response text, stripped of whitespace.
+
+
+#### send(query, data=None, settings=None, stream=False, params=None)
+
+
+### NativeDriver
+
+Extends Driver
+
+
+A ClickHouse driver using the native TCP protocol, via `clickhouse_driver.Client`.
+
+Results are read in full before they are returned (`stream` is ignored), which allows running other queries while
+iterating over them. Like `clickhouse_driver.Client`, a driver must not be used by several threads at once.
+
+#### NativeDriver(host="localhost", **client_kwargs)
+
+
+- `host`: the server's hostname.
+- `client_kwargs`: other arguments of `clickhouse_driver.Client`, such as `port`, `user`, `password`,
+  `secure` or `settings`. The database is chosen by `Database`, so `database` cannot be given.
+
+
+#### client(database=None)
+
+Returns the `clickhouse_driver.Client` connected to `database`, or to the user's default database.
+
+
+#### disconnect()
+
+Closes all connections to the server.
+
+
+#### NativeDriver.from_url(url)
+
+
+Creates a driver from a URL, e.g. `clickhouse://user:password@localhost:9000`.
+See `clickhouse_driver.Client.from_url` for the supported URLs. Any database in the URL is ignored.
+
+
+#### scalar(query, data=None, settings=None, params=None)
+
+Sends a query to the ClickHouse server and returns the response text, stripped of whitespace.
+
+
+#### send(query, data=None, settings=None, stream=False, params=None)
+
 
 clickhouse_orm.models
 ---------------------
@@ -175,16 +293,21 @@ invalid values will cause a `ValueError` to be raised.
 Unrecognized field names will cause an `AttributeError`.
 
 
-#### Model.create_table_sql(db)
+#### Model.create_table_sql(db_name, capabilities=None)
 
 
 Returns the SQL statement for creating a table for this model.
 
+- `db_name`: name of the database to create the table in.
+- `capabilities`: a `ServerCapabilities` describing the target server (defaults to a modern server).
 
-#### Model.drop_table_sql(db)
+
+#### Model.drop_table_sql(db_name)
 
 
 Returns the SQL command for deleting this model's table.
+
+- `db_name`: name of the database containing the table.
 
 
 #### Model.fields(writable=False)
@@ -203,7 +326,8 @@ The `field_names` list must match the fields defined in the model, but does not 
 
 - `line`: the TSV-formatted data.
 - `field_names`: names of the model fields in the data.
-- `timezone_in_use`: the timezone to use when parsing dates and datetimes. Some fields use their own timezones.
+- `timezone_in_use`: passed to each field's `to_python`. Datetime fields ignore it: naive values stay naive,
+  unless the field has its own timezone.
 - `database`: if given, sets the database that this instance belongs to.
 
 
@@ -243,6 +367,8 @@ Returns true if the model represents a system table.
 
 
 Returns a `QuerySet` for selecting instances of this model class.
+
+- `database`: the `Database` (or any other `Executor`) which runs the queries.
 
 
 #### set_database(db)
@@ -305,16 +431,21 @@ invalid values will cause a `ValueError` to be raised.
 Unrecognized field names will cause an `AttributeError`.
 
 
-#### BufferModel.create_table_sql(db)
+#### BufferModel.create_table_sql(db_name, capabilities=None)
 
 
 Returns the SQL statement for creating a table for this model.
 
+- `db_name`: name of the database to create the table in.
+- `capabilities`: a `ServerCapabilities` describing the target server (defaults to a modern server).
 
-#### BufferModel.drop_table_sql(db)
+
+#### BufferModel.drop_table_sql(db_name)
 
 
 Returns the SQL command for deleting this model's table.
+
+- `db_name`: name of the database containing the table.
 
 
 #### BufferModel.fields(writable=False)
@@ -333,7 +464,8 @@ The `field_names` list must match the fields defined in the model, but does not 
 
 - `line`: the TSV-formatted data.
 - `field_names`: names of the model fields in the data.
-- `timezone_in_use`: the timezone to use when parsing dates and datetimes. Some fields use their own timezones.
+- `timezone_in_use`: passed to each field's `to_python`. Datetime fields ignore it: naive values stay naive,
+  unless the field has its own timezone.
 - `database`: if given, sets the database that this instance belongs to.
 
 
@@ -373,6 +505,8 @@ Returns true if the model represents a system table.
 
 
 Returns a `QuerySet` for selecting instances of this model class.
+
+- `database`: the `Database` (or any other `Executor`) which runs the queries.
 
 
 #### set_database(db)
@@ -440,16 +574,21 @@ invalid values will cause a `ValueError` to be raised.
 Unrecognized field names will cause an `AttributeError`.
 
 
-#### MergeModel.create_table_sql(db)
+#### MergeModel.create_table_sql(db_name, capabilities=None)
 
 
 Returns the SQL statement for creating a table for this model.
 
+- `db_name`: name of the database to create the table in.
+- `capabilities`: a `ServerCapabilities` describing the target server (defaults to a modern server).
 
-#### MergeModel.drop_table_sql(db)
+
+#### MergeModel.drop_table_sql(db_name)
 
 
 Returns the SQL command for deleting this model's table.
+
+- `db_name`: name of the database containing the table.
 
 
 #### MergeModel.fields(writable=False)
@@ -468,7 +607,8 @@ The `field_names` list must match the fields defined in the model, but does not 
 
 - `line`: the TSV-formatted data.
 - `field_names`: names of the model fields in the data.
-- `timezone_in_use`: the timezone to use when parsing dates and datetimes. Some fields use their own timezones.
+- `timezone_in_use`: passed to each field's `to_python`. Datetime fields ignore it: naive values stay naive,
+  unless the field has its own timezone.
 - `database`: if given, sets the database that this instance belongs to.
 
 
@@ -508,6 +648,8 @@ Returns true if the model represents a system table.
 
 
 Returns a `QuerySet` for selecting instances of this model class.
+
+- `database`: the `Database` (or any other `Executor`) which runs the queries.
 
 
 #### set_database(db)
@@ -573,16 +715,21 @@ invalid values will cause a `ValueError` to be raised.
 Unrecognized field names will cause an `AttributeError`.
 
 
-#### DistributedModel.create_table_sql(db)
+#### DistributedModel.create_table_sql(db_name, capabilities=None)
 
 
 Returns the SQL statement for creating a table for this model.
 
+- `db_name`: name of the database to create the table in.
+- `capabilities`: a `ServerCapabilities` describing the target server (defaults to a modern server).
 
-#### DistributedModel.drop_table_sql(db)
+
+#### DistributedModel.drop_table_sql(db_name)
 
 
 Returns the SQL command for deleting this model's table.
+
+- `db_name`: name of the database containing the table.
 
 
 #### DistributedModel.fields(writable=False)
@@ -634,7 +781,8 @@ The `field_names` list must match the fields defined in the model, but does not 
 
 - `line`: the TSV-formatted data.
 - `field_names`: names of the model fields in the data.
-- `timezone_in_use`: the timezone to use when parsing dates and datetimes. Some fields use their own timezones.
+- `timezone_in_use`: passed to each field's `to_python`. Datetime fields ignore it: naive values stay naive,
+  unless the field has its own timezone.
 - `database`: if given, sets the database that this instance belongs to.
 
 
@@ -674,6 +822,8 @@ Returns true if the model represents a system table.
 
 
 Returns a `QuerySet` for selecting instances of this model class.
+
+- `database`: the `Database` (or any other `Executor`) which runs the queries.
 
 
 #### set_database(db)
@@ -1150,11 +1300,17 @@ A queryset is an object that represents a database query using a specific `Model
 It is lazy, meaning that it does not hit the database until you iterate over its
 matching rows (model instances).
 
-#### QuerySet(model_cls, database)
+Building the query is pure SQL generation; running it is delegated to an `Executor`
+(normally a `Database`).
+
+#### QuerySet(model_cls, executor)
 
 
 Initializer. It is possible to create a queryset like this, but the standard
 way is to use `MyModel.objects_in(database)`.
+
+- `model_cls`: the model to query.
+- `executor`: the `Executor` which runs the generated SQL, normally a `Database`.
 
 
 #### aggregate(*args, **kwargs)
@@ -1177,7 +1333,15 @@ is equivalent to:
 #### as_sql()
 
 
-Returns the whole query as a SQL string.
+Returns the whole query as a SQL string, with all values inlined
+(unless called while compiling a parameterized query).
+
+
+#### as_sql_with_params()
+
+
+Returns the whole query as a `(sql, params)` pair, where values are bound as query parameters.
+`params` maps parameter names to `EncodedParam` values, as accepted by `Database.select`.
 
 
 #### conditions_as_sql(prewhere=False)
@@ -1269,6 +1433,14 @@ The result is a namedtuple containing `objects` (list), `number_of_objects`,
 `pages_total`, `number` (of the current page), and `page_size`.
 
 
+#### parameterized(enabled=True)
+
+
+Returns a copy of this queryset which sends filter values and function arguments to the server as
+query parameters (`{name:Type}` placeholders) rather than inlining them into the SQL.
+This also applies to any subquery used by the queryset.
+
+
 #### select_fields_as_sql()
 
 
@@ -1315,7 +1487,15 @@ This method is not supported on `AggregateQuerySet`.
 #### as_sql()
 
 
-Returns the whole query as a SQL string.
+Returns the whole query as a SQL string, with all values inlined
+(unless called while compiling a parameterized query).
+
+
+#### as_sql_with_params()
+
+
+Returns the whole query as a `(sql, params)` pair, where values are bound as query parameters.
+`params` maps parameter names to `EncodedParam` values, as accepted by `Database.select`.
 
 
 #### conditions_as_sql(prewhere=False)
@@ -1411,6 +1591,14 @@ partitioning of records into pages.
 
 The result is a namedtuple containing `objects` (list), `number_of_objects`,
 `pages_total`, `number` (of the current page), and `page_size`.
+
+
+#### parameterized(enabled=True)
+
+
+Returns a copy of this queryset which sends filter values and function arguments to the server as
+query parameters (`{name:Type}` placeholders) rather than inlining them into the SQL.
+This also applies to any subquery used by the queryset.
 
 
 #### select_fields_as_sql()
@@ -2717,6 +2905,42 @@ Initializer.
 #### startsWith(prefix)
 
 
+#### stddevPop(**kwargs)
+
+
+#### stddevPopIf(cond)
+
+
+#### stddevPopOrDefault()
+
+
+#### stddevPopOrDefaultIf(cond)
+
+
+#### stddevPopOrNull()
+
+
+#### stddevPopOrNullIf(cond)
+
+
+#### stddevSamp(**kwargs)
+
+
+#### stddevSampIf(cond)
+
+
+#### stddevSampOrDefault()
+
+
+#### stddevSampOrDefaultIf(cond)
+
+
+#### stddevSampOrNull()
+
+
+#### stddevSampOrNullIf(cond)
+
+
 #### substring(**kwargs)
 
 
@@ -3274,10 +3498,13 @@ Unrecognized field names will cause an `AttributeError`.
 Returns: SQL Query
 
 
-#### SystemPart.create_table_sql(db)
+#### SystemPart.create_table_sql(db_name, capabilities=None)
 
 
 Returns the SQL statement for creating a table for this model.
+
+- `db_name`: name of the database to create the table in.
+- `capabilities`: a `ServerCapabilities` describing the target server (defaults to a modern server).
 
 
 #### detach(settings=None)
@@ -3300,10 +3527,12 @@ Delete a partition
 Returns: SQL Query
 
 
-#### SystemPart.drop_table_sql(db)
+#### SystemPart.drop_table_sql(db_name)
 
 
 Returns the SQL command for deleting this model's table.
+
+- `db_name`: name of the database containing the table.
 
 
 #### fetch(zookeeper_path, settings=None)
@@ -3343,7 +3572,8 @@ The `field_names` list must match the fields defined in the model, but does not 
 
 - `line`: the TSV-formatted data.
 - `field_names`: names of the model fields in the data.
-- `timezone_in_use`: the timezone to use when parsing dates and datetimes. Some fields use their own timezones.
+- `timezone_in_use`: passed to each field's `to_python`. Datetime fields ignore it: naive values stay naive,
+  unless the field has its own timezone.
 - `database`: if given, sets the database that this instance belongs to.
 
 
@@ -3405,6 +3635,8 @@ Returns true if the model represents a system table.
 
 
 Returns a `QuerySet` for selecting instances of this model class.
+
+- `database`: the `Database` (or any other `Executor`) which runs the queries.
 
 
 #### set_database(db)

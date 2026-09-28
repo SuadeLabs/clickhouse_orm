@@ -2,88 +2,23 @@ from __future__ import annotations
 
 import datetime
 import logging
-import re
+from itertools import chain
 from math import ceil
-from string import Template
+from typing import TYPE_CHECKING
 
 import pytz
-import requests
 
+from .compiler import ServerCapabilities, qualified_name, substitute
+from .driver import Driver, RequestsDriver
+from .exceptions import DatabaseException, ServerError
 from .models import ModelBase
-from .utils import Page, import_submodules, parse_tsv
+from .params import encode_params
+from .utils import Page, import_submodules
+
+if TYPE_CHECKING:
+    from .codec import Codec
 
 logger = logging.getLogger("clickhouse_orm")
-
-
-class DatabaseException(Exception):  # noqa: N818
-    """
-    Raised when a database operation fails.
-    """
-
-
-class ServerError(DatabaseException):
-    """
-    Raised when a server returns an error.
-    """
-
-    def __init__(self, message):
-        self.code = None
-        processed = self.get_error_code_msg(message)
-        if processed:
-            self.code, self.message = processed
-        else:
-            # just skip custom init
-            # if non-standard message format
-            self.message = message
-            super().__init__(message)
-
-    ERROR_PATTERNS = (
-        # ClickHouse prior to v19.3.3
-        re.compile(
-            r"""
-            Code:\ (?P<code>\d+),
-            \ e\.displayText\(\)\ =\ (?P<type1>[^ \n]+):\ (?P<msg>.+?),
-            \ e.what\(\)\ =\ (?P<type2>[^ \n]+)
-        """,
-            re.VERBOSE | re.DOTALL,
-        ),
-        # ClickHouse v19.3.3+
-        re.compile(
-            r"""
-            Code:\ (?P<code>\d+),
-            \ e\.displayText\(\)\ =\ (?P<type1>[^ \n]+):\ (?P<msg>.+)
-        """,
-            re.VERBOSE | re.DOTALL,
-        ),
-        # ClickHouse v21+
-        re.compile(
-            r"""
-            Code:\ (?P<code>\d+).
-            \ (?P<type1>[^ \n]+):\ (?P<msg>.+)
-        """,
-            re.VERBOSE | re.DOTALL,
-        ),
-    )
-
-    @classmethod
-    def get_error_code_msg(cls, full_error_message):
-        """
-        Extract the code and message of the exception that clickhouse-server generated.
-
-        See the list of error codes here:
-        https://github.com/yandex/ClickHouse/blob/master/dbms/src/Common/ErrorCodes.cpp
-        """
-        for pattern in cls.ERROR_PATTERNS:
-            match = pattern.match(full_error_message)
-            if match:
-                # assert match.group('type1') == match.group('type2')
-                return int(match.group("code")), match.group("msg").strip()
-
-        return 0, full_error_message
-
-    def __str__(self):
-        if self.code is not None:
-            return f"{self.message} ({self.code})"
 
 
 class Database:
@@ -105,13 +40,14 @@ class Database:
         timeout=60,
         verify_ssl_cert=True,
         log_statements=False,
+        driver=None,
     ):
         """
         Initializes a database instance. Unless it's readonly, the database will be
         created on the ClickHouse server if it does not already exist.
 
         - `db_name`: name of the database to connect to.
-        - `db_url`: URL of the ClickHouse server.
+        - `db_url`: URL of the ClickHouse server's HTTP interface.
         - `username`: optional connection credentials.
         - `password`: optional connection credentials.
         - `readonly`: use a read-only connection.
@@ -119,17 +55,35 @@ class Database:
         - `timeout`: the connection timeout in seconds.
         - `verify_ssl_cert`: whether to verify the server's certificate when connecting via HTTPS.
         - `log_statements`: when True, all database statements are logged.
+        - `driver`: the `Driver` used to communicate with the server. Defaults to a `RequestsDriver` configured by
+          `db_url`, `username`, `password`, `timeout` and `verify_ssl_cert`, which only apply to the default driver.
         """
         self.db_name = db_name
-        self.db_url = db_url or self._default_url
         self.readonly = False
         self.timeout = timeout
-        self.request_session = requests.Session()
-        self.request_session.verify = verify_ssl_cert
-        if username:
-            self.request_session.auth = (username, password or "")
+        if driver is None:
+            self.db_url = db_url or self._default_url
+            driver = RequestsDriver(
+                self.db_url,
+                username=username,
+                password=password,
+                timeout=timeout,
+                verify_ssl_cert=verify_ssl_cert,
+            )
+        elif db_url or username or password:
+            raise ValueError(
+                "db_url, username and password configure the default driver, and cannot be used with driver"
+            )
+        else:
+            self.db_url = None
+        self.driver: Driver = driver
+        self.codec: Codec = driver.codec
         self.log_statements = log_statements
         self.settings = {}
+        # Lazily created by the optional SQLAlchemy backend (see `engine`, `metadata`, `get_table()`, `query()`)
+        self._sa_engine = None
+        self._sa_metadata = None
+        self._sa_tables = {}
         self.db_exists = False  # this is required before running _is_existing_database
         self.db_exists = self._is_existing_database()
         if readonly:
@@ -142,10 +96,17 @@ class Database:
         self.server_version = self._get_server_version()
         # Versions 1.1.53981 and below don't have timezone function
         self.server_timezone = self._get_server_timezone() if self.server_version > (1, 1, 53981) else pytz.utc
-        # Versions 19.1.16 and above support codec compression
-        self.has_codec_support = self.server_version >= (19, 1, 16)
-        # Version 19.0 and above support LowCardinality
-        self.has_low_cardinality_support = self.server_version >= (19, 0)
+        self.capabilities = ServerCapabilities.from_version(self.server_version)
+
+    @property
+    def has_codec_support(self):
+        """Whether the server supports column compression codecs (19.1.16+)."""
+        return self.capabilities.has_codec_support
+
+    @property
+    def has_low_cardinality_support(self):
+        """Whether the server supports LowCardinality columns (19.0+)."""
+        return self.capabilities.has_low_cardinality_support
 
     def create_database(self):
         """
@@ -169,7 +130,7 @@ class Database:
             raise DatabaseException("You can't create system table")
         if model_class.engine is None:
             raise DatabaseException("%s class must define an engine" % model_class.__name__)
-        self._send(model_class.create_table_sql(self))
+        self._send(model_class.create_table_sql(self.db_name, self.capabilities))
 
     def drop_table(self, model_class):
         """
@@ -177,7 +138,61 @@ class Database:
         """
         if model_class.is_system_model():
             raise DatabaseException("You can't drop system table")
-        self._send(model_class.drop_table_sql(self))
+        self._send(model_class.drop_table_sql(self.db_name))
+
+    @property
+    def engine(self):
+        """
+        A lazily-created SQLAlchemy `Engine`, connected via the `clickhouse-connect` SQLAlchemy dialect and reusing
+        this database's HTTP connection settings. Used by `query()` (see `clickhouse_orm.alchemy`).
+
+        Requires the `sqlalchemy` extra (`pip install clickhouse_orm[sqlalchemy]`).
+        """
+        if self._sa_engine is None:
+            from .alchemy import build_engine
+
+            self._sa_engine = build_engine(self)
+        return self._sa_engine
+
+    @property
+    def metadata(self):
+        """The shared SQLAlchemy `MetaData` used by `get_table()`/`query()`."""
+        if self._sa_metadata is None:
+            from .alchemy import sqlalchemy
+
+            self._sa_metadata = sqlalchemy.MetaData()
+        return self._sa_metadata
+
+    def get_table(self, model_class):
+        """
+        Returns the SQLAlchemy Core `Table` matching a model class, building (and caching, on this `Database`
+        instance) it if necessary. See `clickhouse_orm.alchemy.build_table()`.
+        """
+        table = self._sa_tables.get(model_class)
+        if table is None:
+            from .alchemy import build_table
+
+            schema = "system" if model_class.is_system_model() else self.db_name
+            table = build_table(model_class, self.metadata, schema=schema, capabilities=self.capabilities)
+            self._sa_tables[model_class] = table
+        return table
+
+    def query(self, model_class, *entities):
+        """
+        Returns a `ModelSelect`, a SQLAlchemy Core `Select` bound to `model_class`'s table, as an alternative to
+        `model_class.objects_in(self)`. Unlike a `QuerySet`, it is filtered/ordered/joined using plain SQLAlchemy
+        expressions on `Table.c` (e.g. `qs.table.c.value > 10`) rather than `Q`/`funcs`.
+
+        - `model_class`: the model to query; its table is available as `.table` on the returned `ModelSelect`.
+        - `entities`: optional specific columns/expressions to select, instead of the whole table.
+
+        Requires the `sqlalchemy` extra (`pip install clickhouse_orm[sqlalchemy]`).
+        """
+        from .alchemy import ModelSelect, sqlalchemy
+
+        table = self.get_table(model_class)
+        statement = sqlalchemy.select(*entities) if entities else sqlalchemy.select(table)
+        return ModelSelect(statement, self, model_class, table)
 
     def does_table_exist(self, model_class):
         """
@@ -185,8 +200,7 @@ class Database:
         Note that this only checks for existence of a table with the expected name.
         """
         sql = "SELECT count() FROM system.tables WHERE database = '%s' AND name = '%s'"
-        r = self._send(sql % (self.db_name, model_class.table_name()))
-        return r.text.strip() == "1"
+        return self._scalar(sql % (self.db_name, model_class.table_name())) == "1"
 
     def get_model_for_table(self, table_name, system_table=False):
         """
@@ -198,9 +212,8 @@ class Database:
         - `system_table`: whether the table is a system table, or belongs to the current database
         """
         db_name = "system" if system_table else self.db_name
-        sql = "DESCRIBE `%s`.`%s` FORMAT TSV" % (db_name, table_name)
-        lines = self._send(sql).iter_lines()
-        fields = [parse_tsv(line)[:2] for line in lines]
+        sql = "DESCRIBE %s" % qualified_name(db_name, table_name)
+        fields = [(column.name, column.type) for column in self.select(sql)]
         model = ModelBase.create_ad_hoc_model(fields, table_name)
         if system_table:
             model._system = model._readonly = True
@@ -227,8 +240,6 @@ class Database:
         - `model_instances`: any iterable containing instances of a single model class.
         - `batch_size`: number of records to send per chunk (use a lower number if your records are very large).
         """
-        from io import BytesIO
-
         i = iter(model_instances)
         try:
             first_instance = next(i)
@@ -239,39 +250,17 @@ class Database:
         if first_instance.is_read_only() or first_instance.is_system_model():
             raise DatabaseException("You can't insert into read only and system tables")
 
-        fields_list = ",".join(["`%s`" % name for name in first_instance.fields(writable=True)])
-        fmt = "TSKV" if model_class.has_funcs_as_defaults() else "TabSeparated"
-        query = "INSERT INTO $table (%s) FORMAT %s\n" % (fields_list, fmt)
+        instances = self._attach(chain([first_instance], i))
+        for statement, data in self.codec.encode_inserts(model_class, instances, batch_size):
+            self._send(self._substitute(statement, model_class), data=data)
 
-        def gen():
-            buf = BytesIO()
-            buf.write(self._substitute(query, model_class).encode("utf-8"))
-            first_instance.set_database(self)
-            buf.write(first_instance.to_db_string())
-            # Collect lines in batches of batch_size
-            lines = 2
-            for instance in i:
-                instance.set_database(self)
-                buf.write(instance.to_db_string())
-                lines += 1
-                if lines >= batch_size:
-                    # Return the current batch of lines
-                    yield buf.getvalue()
-                    # Start a new batch
-                    buf = BytesIO()
-                    lines = 0
-            # Return any remaining lines in partial batch
-            if lines:
-                yield buf.getvalue()
-
-        self._send(gen())
-
-    def count(self, model_class, conditions=None):
+    def count(self, model_class, conditions=None, params=None):
         """
         Counts the number of records in the model's table.
 
         - `model_class`: the model to count.
         - `conditions`: optional SQL conditions (contents of the WHERE clause).
+        - `params`: values for `{name:Type}` placeholders in the conditions.
         """
         from clickhouse_orm.query import Q
 
@@ -281,10 +270,10 @@ class Database:
                 conditions = conditions.to_sql(model_class)
             query += " WHERE " + str(conditions)
         query = self._substitute(query, model_class)
-        r = self._send(query)
-        return int(r.text) if r.text else 0
+        result = self._scalar(query, params=params)
+        return int(result) if result else 0
 
-    def select(self, query, model_class=None, settings=None):
+    def select(self, query, model_class=None, settings=None, params=None):
         """
         Performs a query and returns a generator of model instances.
 
@@ -292,31 +281,43 @@ class Database:
         - `model_class`: the model class matching the query's table,
           or `None` for getting back instances of an ad-hoc model.
         - `settings`: query settings to send as HTTP GET parameters
+        - `params`: values for `{name:Type}` placeholders in the query (see "Query Parameters")
         """
-        query += " FORMAT TabSeparatedWithNamesAndTypes"
-        query = self._substitute(query, model_class)
-        r = self._send(query, settings, True)
-        lines = r.iter_lines()
-        field_names = parse_tsv(next(lines))
-        field_types = parse_tsv(next(lines))
-        model_class = model_class or ModelBase.create_ad_hoc_model(zip(field_names, field_types))
-        for line in lines:
-            # skip blank line left by WITH TOTALS modifier
-            if line:
-                yield model_class.from_tsv(line, field_names, self.server_timezone, self)
+        query = self._substitute(self._with_select_format(query), model_class)
+        r = self._send(query, settings=settings, stream=True, params=params)
+        yield from self._attach(self.codec.decode(r, model_class, self.server_timezone))
 
-    def raw(self, query, settings=None, stream=False):
+    def select_rows(self, query, settings=None, params=None):
+        """
+        Performs a query and returns a `RowResult`: its `columns` attribute lists the `(name, type)`
+        of each column, and iterating over it yields each row as a plain tuple.
+
+        Unlike `select`, no model instances are created. Values use the same Python types as
+        `clickhouse_driver` (e.g. `DateTime` columns without a timezone are naive datetimes in the
+        server's timezone, and enums are returned as their names). Rows are streamed from the server,
+        so the result can only be iterated once.
+
+        - `query`: the SQL query to execute.
+        - `settings`: query settings to send as HTTP GET parameters
+        - `params`: values for `{name:Type}` placeholders in the query
+        """
+        query = self._substitute(self._with_select_format(query), None)
+        r = self._send(query, settings=settings, stream=True, params=params)
+        return self.codec.decode_rows(r, self.server_timezone)
+
+    def raw(self, query, settings=None, stream=False, params=None):
         """
         Performs a query and returns its output as text.
 
         - `query`: the SQL query to execute.
         - `settings`: query settings to send as HTTP GET parameters
         - `stream`: if true, the HTTP response from ClickHouse will be streamed.
+        - `params`: values for `{name:Type}` placeholders in the query
         """
         query = self._substitute(query, None)
-        return self._send(query, settings=settings, stream=stream).text
+        return self._send(query, settings=settings, stream=stream, params=params).text
 
-    def paginate(self, model_class, order_by, page_num=1, page_size=100, conditions=None, settings=None):
+    def paginate(self, model_class, order_by, page_num=1, page_size=100, conditions=None, settings=None, params=None):
         """
         Selects records and returns a single page of model instances.
 
@@ -327,13 +328,14 @@ class Database:
         - `page_size`: number of records to return per page.
         - `conditions`: optional SQL conditions (contents of the WHERE clause).
         - `settings`: query settings to send as HTTP GET parameters
+        - `params`: values for `{name:Type}` placeholders in the conditions
 
         The result is a namedtuple containing `objects` (list), `number_of_objects`,
         `pages_total`, `number` (of the current page), and `page_size`.
         """
         from clickhouse_orm.query import Q
 
-        count = self.count(model_class, conditions)
+        count = self.count(model_class, conditions, params=params)
         pages_total = int(ceil(count / float(page_size)))
         if page_num == -1:
             page_num = max(pages_total, 1)
@@ -349,7 +351,7 @@ class Database:
         query += " LIMIT %d, %d" % (offset, page_size)
         query = self._substitute(query, model_class)
         return Page(
-            objects=list(self.select(query, model_class, settings)) if count else [],
+            objects=list(self.select(query, model_class, settings, params=params)) if count else [],
             number_of_objects=count,
             pages_total=pages_total,
             number=page_num,
@@ -392,16 +394,35 @@ class Database:
         query = self._substitute(query, MigrationHistory)
         return set(obj.module_name for obj in self.select(query))
 
-    def _send(self, data, settings=None, stream=False):
-        if isinstance(data, str):
-            data = data.encode("utf-8")
-            if self.log_statements:
-                logger.info(data)
-        params = self._build_params(settings)
-        r = self.request_session.post(self.db_url, params=params, data=data, stream=stream, timeout=self.timeout)
-        if r.status_code != 200:
-            raise ServerError(r.text)
-        return r
+    @property
+    def request_session(self):
+        """The `requests.Session` used by the default `RequestsDriver`. Kept for backwards compatibility."""
+        return self.driver.session
+
+    def _with_select_format(self, query):
+        return query + " FORMAT " + self.codec.select_format if self.codec.select_format else query
+
+    def _attach(self, instances):
+        """Lazily sets this database on each model instance as it is consumed."""
+        for instance in instances:
+            instance.set_database(self)
+            yield instance
+
+    def _send(self, query, data=None, settings=None, stream=False, params=None):
+        params = self._encode_params(query, params)
+        return self.driver.send(query, data=data, settings=self._build_params(settings), stream=stream, params=params)
+
+    def _scalar(self, query, settings=None, params=None):
+        params = self._encode_params(query, params)
+        return self.driver.scalar(query, settings=self._build_params(settings), params=params)
+
+    def _encode_params(self, query, params):
+        encoded = encode_params(params)
+        if self.log_statements:
+            logger.info(query)
+            if encoded:
+                logger.info("params: %s", encoded)
+        return encoded
 
     def _build_params(self, settings):
         params = dict(settings or {})
@@ -417,40 +438,28 @@ class Database:
         """
         Replaces $db and $table placeholders in the query.
         """
-        if "$" in query:
-            mapping = dict(db="`%s`" % self.db_name)
-            if model_class:
-                if model_class.is_system_model():
-                    mapping["table"] = "`system`.`%s`" % model_class.table_name()
-                else:
-                    mapping["table"] = "`%s`.`%s`" % (self.db_name, model_class.table_name())
-            query = Template(query).safe_substitute(mapping)
-        return query
+        return substitute(query, self.db_name, model_class)
 
     def _get_server_timezone(self):
         try:
-            r = self._send("SELECT timezone()")
-            return pytz.timezone(r.text.strip())
+            return pytz.timezone(self._scalar("SELECT timezone()"))
         except ServerError as e:
             logger.exception("Cannot determine server timezone (%s), assuming UTC", e)
             return pytz.utc
 
     def _get_server_version(self, as_tuple=True):
         try:
-            r = self._send("SELECT version();")
-            ver = r.text
+            ver = self._scalar("SELECT version();")
         except ServerError as e:
             logger.exception("Cannot determine server version (%s), assuming 1.1.0", e)
             ver = "1.1.0"
         return tuple(int(n) for n in ver.split(".") if n.isdigit()) if as_tuple else ver
 
     def _is_existing_database(self):
-        r = self._send("SELECT count() FROM system.databases WHERE name = '%s'" % self.db_name)
-        return r.text.strip() == "1"
+        return self._scalar("SELECT count() FROM system.databases WHERE name = '%s'" % self.db_name) == "1"
 
     def _is_connection_readonly(self):
-        r = self._send("SELECT value FROM system.settings WHERE name = 'readonly'")
-        return r.text.strip() != "0"
+        return self._scalar("SELECT value FROM system.settings WHERE name = 'readonly'") != "0"
 
 
 # Expose only relevant classes in import *

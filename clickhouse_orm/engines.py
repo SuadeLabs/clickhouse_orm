@@ -2,28 +2,40 @@ from __future__ import annotations
 
 import logging
 
+from .compiler import ServerCapabilities, quote_identifier, resolve_ddl_target
+from .exceptions import DatabaseException
 from .utils import comma_join, get_subclass_names
 
 logger = logging.getLogger("clickhouse_orm")
 
 
 class Engine:
-    def create_table_sql(self, db):
+    def create_table_sql(self, db_name, capabilities=None):
+        """
+        Returns the engine clause of a CREATE TABLE statement.
+
+        - `db_name`: name of the database the table is created in.
+        - `capabilities`: a `ServerCapabilities` describing the target server (defaults to a modern server).
+        """
+        db_name, capabilities = resolve_ddl_target(db_name, capabilities, "Engine.create_table_sql")
+        return self._create_table_sql(db_name, capabilities)
+
+    def _create_table_sql(self, db_name: str, capabilities: ServerCapabilities) -> str:
         raise NotImplementedError()  # pragma: no cover
 
 
 class TinyLog(Engine):
-    def create_table_sql(self, db):
+    def _create_table_sql(self, db_name, capabilities):
         return "TinyLog"
 
 
 class Log(Engine):
-    def create_table_sql(self, db):
+    def _create_table_sql(self, db_name, capabilities):
         return "Log"
 
 
 class Memory(Engine):
-    def create_table_sql(self, db):
+    def _create_table_sql(self, db_name, capabilities):
         return "Memory"
 
 
@@ -78,7 +90,7 @@ class MergeTree(Engine):
         )
         self.order_by = value
 
-    def create_table_sql(self, db):
+    def _create_table_sql(self, db_name, capabilities):
         name = self.__class__.__name__
         if self.replica_name:
             name = "Replicated" + name
@@ -86,7 +98,7 @@ class MergeTree(Engine):
         # In ClickHouse 1.1.54310 custom partitioning key was introduced
         # https://clickhouse.tech/docs/en/table_engines/custom_partitioning_key/
         # Let's check version and use new syntax if available
-        if db.server_version >= (1, 1, 54310):
+        if capabilities.has_custom_partitioning:
             partition_sql = "PARTITION BY (%s) ORDER BY (%s)" % (
                 comma_join(map(str, self.partition_key)),
                 comma_join(map(str, self.order_by)),
@@ -101,9 +113,6 @@ class MergeTree(Engine):
             partition_sql += " SETTINGS index_granularity=%d" % self.index_granularity
 
         elif not self.date_col:
-            # Can't import it globally due to circular import
-            from clickhouse_orm.database import DatabaseException
-
             raise DatabaseException(
                 "Custom partitioning is not supported before ClickHouse 1.1.54310. "
                 "Please update your server or use date_col syntax."
@@ -112,10 +121,10 @@ class MergeTree(Engine):
         else:
             partition_sql = ""
 
-        params = self._build_sql_params(db)
+        params = self._build_sql_params(capabilities)
         return "%s(%s) %s" % (name, comma_join(params), partition_sql)
 
-    def _build_sql_params(self, db):
+    def _build_sql_params(self, capabilities):
         params = []
         if self.replica_name:
             params += ["'%s'" % self.replica_table_path, "'%s'" % self.replica_name]
@@ -124,11 +133,11 @@ class MergeTree(Engine):
         # https://clickhouse.tech/docs/en/table_engines/custom_partitioning_key/
         # These parameters are process in create_table_sql directly.
         # In previous ClickHouse versions this this syntax does not work.
-        if db.server_version < (1, 1, 54310):
+        if not capabilities.has_custom_partitioning:
             params.append(self.date_col)
             if self.sampling_expr:
                 params.append(self.sampling_expr)
-            params.append("(%s)" % comma_join(map(str(self.order_by))))
+            params.append("(%s)" % comma_join(map(str, self.order_by)))
             params.append(str(self.index_granularity))
 
         return params
@@ -159,8 +168,8 @@ class CollapsingMergeTree(MergeTree):
         )
         self.sign_col = sign_col
 
-    def _build_sql_params(self, db):
-        params = super()._build_sql_params(db)
+    def _build_sql_params(self, capabilities):
+        params = super()._build_sql_params(capabilities)
         params.append(self.sign_col)
         return params
 
@@ -191,8 +200,8 @@ class SummingMergeTree(MergeTree):
         assert type is None or type(summing_cols) in (list, tuple), "summing_cols must be a list or tuple"
         self.summing_cols = summing_cols
 
-    def _build_sql_params(self, db):
-        params = super()._build_sql_params(db)
+    def _build_sql_params(self, capabilities):
+        params = super()._build_sql_params(capabilities)
         if self.summing_cols:
             params.append("(%s)" % comma_join(self.summing_cols))
         return params
@@ -223,8 +232,8 @@ class ReplacingMergeTree(MergeTree):
         )
         self.ver_col = ver_col
 
-    def _build_sql_params(self, db):
-        params = super()._build_sql_params(db)
+    def _build_sql_params(self, capabilities):
+        params = super()._build_sql_params(capabilities)
         if self.ver_col:
             params.append(self.ver_col)
         return params
@@ -258,12 +267,12 @@ class Buffer(Engine):
         self.min_bytes = min_bytes
         self.max_bytes = max_bytes
 
-    def create_table_sql(self, db):
+    def _create_table_sql(self, db_name, capabilities):
         # Overriden create_table_sql example:
         # sql = 'ENGINE = Buffer(merge, hits, 16, 10, 100, 10000, 1000000, 10000000, 100000000)'
-        sql = "ENGINE = Buffer(`%s`, `%s`, %d, %d, %d, %d, %d, %d, %d)" % (
-            db.db_name,
-            self.main_model.table_name(),
+        sql = "ENGINE = Buffer(%s, %s, %d, %d, %d, %d, %d, %d, %d)" % (
+            quote_identifier(db_name),
+            quote_identifier(self.main_model.table_name()),
             self.num_layers,
             self.min_time,
             self.max_time,
@@ -287,8 +296,8 @@ class Merge(Engine):
         assert isinstance(table_regex, str), "'table_regex' parameter must be string"
         self.table_regex = table_regex
 
-    def create_table_sql(self, db):
-        return "Merge(`%s`, '%s')" % (db.db_name, self.table_regex)
+    def _create_table_sql(self, db_name, capabilities):
+        return "Merge(%s, '%s')" % (quote_identifier(db_name), self.table_regex)
 
 
 class Distributed(Engine):
@@ -327,16 +336,16 @@ class Distributed(Engine):
 
         return table
 
-    def create_table_sql(self, db):
+    def _create_table_sql(self, db_name, capabilities):
         name = self.__class__.__name__
-        params = self._build_sql_params(db)
+        params = self._build_sql_params(db_name)
         return "%s(%s)" % (name, ", ".join(params))
 
-    def _build_sql_params(self, db):
+    def _build_sql_params(self, db_name):
         if self.table_name is None:
             raise ValueError(f"Cannot create {self.__class__.__name__} engine: specify an underlying table")
 
-        params = ["`%s`" % p for p in [self.cluster, db.db_name, self.table_name]]
+        params = [quote_identifier(p) for p in [self.cluster, db_name, self.table_name]]
         if self.sharding_key:
             params.append(self.sharding_key)
         return params
