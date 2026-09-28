@@ -16,6 +16,9 @@ Unreleased
   properties proxying it
 - `$db` / `$table` substitution moved to `clickhouse_orm.compiler.substitute`; migrations use qualified table names
 - bugfix: pre-1.1.54310 `MergeTree` syntax raised a `TypeError`
+- Serialisation moved into a pluggable `Codec` (`clickhouse_orm.codec`); `Database.codec` defaults to `TSVCodec`,
+  which owns the wire formats, TSV header parsing and insert batching
+- `insert(batch_size=n)` now sends exactly `n` rows per chunk (previously the first chunk held one row fewer)
 
 **Deprecations / backwards incompatible changes**
 

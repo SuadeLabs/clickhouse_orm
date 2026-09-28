@@ -2,15 +2,17 @@ from __future__ import annotations
 
 import datetime
 import logging
+from itertools import chain
 from math import ceil
 
 import pytz
 
-from .compiler import ServerCapabilities, qualified_name, substitute
+from .codec import Codec, TSVCodec
+from .compiler import ServerCapabilities, qualified_name, quote_identifier, substitute
 from .driver import Driver, RequestsDriver
 from .exceptions import DatabaseException, ServerError
 from .models import ModelBase
-from .utils import Page, import_submodules, parse_tsv
+from .utils import Page, import_submodules
 
 logger = logging.getLogger("clickhouse_orm")
 
@@ -60,6 +62,7 @@ class Database:
             timeout=timeout,
             verify_ssl_cert=verify_ssl_cert,
         )
+        self.codec: Codec = TSVCodec()
         self.log_statements = log_statements
         self.settings = {}
         self.db_exists = False  # this is required before running _is_existing_database
@@ -136,9 +139,8 @@ class Database:
         - `system_table`: whether the table is a system table, or belongs to the current database
         """
         db_name = "system" if system_table else self.db_name
-        sql = "DESCRIBE %s FORMAT TSV" % qualified_name(db_name, table_name)
-        lines = self._send(sql).iter_lines()
-        fields = [parse_tsv(line)[:2] for line in lines]
+        sql = "DESCRIBE %s" % qualified_name(db_name, table_name)
+        fields = [(column.name, column.type) for column in self.select(sql)]
         model = ModelBase.create_ad_hoc_model(fields, table_name)
         if system_table:
             model._system = model._readonly = True
@@ -165,8 +167,6 @@ class Database:
         - `model_instances`: any iterable containing instances of a single model class.
         - `batch_size`: number of records to send per chunk (use a lower number if your records are very large).
         """
-        from io import BytesIO
-
         i = iter(model_instances)
         try:
             first_instance = next(i)
@@ -177,31 +177,11 @@ class Database:
         if first_instance.is_read_only() or first_instance.is_system_model():
             raise DatabaseException("You can't insert into read only and system tables")
 
-        fields_list = ",".join(["`%s`" % name for name in first_instance.fields(writable=True)])
-        fmt = "TSKV" if model_class.has_funcs_as_defaults() else "TabSeparated"
+        fields_list = ",".join(quote_identifier(name) for name in model_class.fields(writable=True))
+        fmt = self.codec.insert_format(model_class)
         query = self._substitute("INSERT INTO $table (%s) FORMAT %s" % (fields_list, fmt), model_class)
-
-        def gen():
-            buf = BytesIO()
-            first_instance.set_database(self)
-            buf.write(first_instance.to_db_string())
-            # Collect lines in batches of batch_size
-            lines = 1
-            for instance in i:
-                instance.set_database(self)
-                buf.write(instance.to_db_string())
-                lines += 1
-                if lines >= batch_size:
-                    # Return the current batch of lines
-                    yield buf.getvalue()
-                    # Start a new batch
-                    buf = BytesIO()
-                    lines = 0
-            # Return any remaining lines in partial batch
-            if lines:
-                yield buf.getvalue()
-
-        self._send(query, data=gen())
+        instances = self._attach(chain([first_instance], i))
+        self._send(query, data=self.codec.encode(model_class, instances, batch_size))
 
     def count(self, model_class, conditions=None):
         """
@@ -230,17 +210,10 @@ class Database:
           or `None` for getting back instances of an ad-hoc model.
         - `settings`: query settings to send as HTTP GET parameters
         """
-        query += " FORMAT TabSeparatedWithNamesAndTypes"
+        query += " FORMAT " + self.codec.select_format
         query = self._substitute(query, model_class)
         r = self._send(query, settings=settings, stream=True)
-        lines = r.iter_lines()
-        field_names = parse_tsv(next(lines))
-        field_types = parse_tsv(next(lines))
-        model_class = model_class or ModelBase.create_ad_hoc_model(zip(field_names, field_types))
-        for line in lines:
-            # skip blank line left by WITH TOTALS modifier
-            if line:
-                yield model_class.from_tsv(line, field_names, self.server_timezone, self)
+        yield from self._attach(self.codec.decode(r.iter_lines(), model_class, self.server_timezone))
 
     def raw(self, query, settings=None, stream=False):
         """
@@ -333,6 +306,12 @@ class Database:
     def request_session(self):
         """The `requests.Session` used by the default `RequestsDriver`. Kept for backwards compatibility."""
         return self.driver.session
+
+    def _attach(self, instances):
+        """Lazily sets this database on each model instance as it is consumed."""
+        for instance in instances:
+            instance.set_database(self)
+            yield instance
 
     def _send(self, query, data=None, settings=None, stream=False):
         if self.log_statements:
