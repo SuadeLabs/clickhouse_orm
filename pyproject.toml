@@ -34,8 +34,14 @@ dependencies = [
 native = [
   "clickhouse-driver>=0.2.7",
 ]
+sqlalchemy = [
+  "sqlalchemy>=1.4",
+  "clickhouse-connect[sqlalchemy]",
+]
 dev = [
   "clickhouse-driver==0.2.10",
+  "sqlalchemy>=1.4",
+  "clickhouse-connect[sqlalchemy]",
   "docker==7.1.0",
   "pytest==9.0.2",
   "ruff==0.14.14",

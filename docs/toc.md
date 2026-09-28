@@ -44,6 +44,11 @@
       * [Parameterized Querysets](querysets.md#parameterized-querysets)
       * [Executors](querysets.md#executors)
 
+   * [SQLAlchemy Core Querying (optional)](sqlalchemy_core.md#sqlalchemy-core-querying-optional)
+      * [Installation](sqlalchemy_core.md#installation)
+      * [Querying](sqlalchemy_core.md#querying)
+      * [Table metadata](sqlalchemy_core.md#table-metadata)
+
    * [Field Options](field_options.md#field-options)
       * [default](field_options.md#default)
       * [alias / materialized](field_options.md#alias-/-materialized)

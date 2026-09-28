@@ -3,6 +3,12 @@ Change Log
 
 Unreleased
 ----------
+- New optional SQLAlchemy Core backend (`pip install clickhouse_orm[sqlalchemy]`, see
+  `docs/sqlalchemy_core.md`): `Database.query(model_class)` returns a `ModelSelect` wrapping a SQLAlchemy `Select`
+  bound to a `Table` generated from the model (`Database.get_table()`), filtered/ordered with plain SQLAlchemy
+  expressions and executed via a lazily-created `Database.engine` (the `clickhouse-connect` dialect); rows are
+  mapped back to model instances by column name (`Field.to_python()`). This is fully additive - `QuerySet`,
+  `Model.objects_in()` and the TSV-based `Database.insert()` are unchanged and remain the default path.
 - All HTTP I/O now goes through a pluggable `Driver` (`clickhouse_orm.driver`); `Database.driver` defaults to `RequestsDriver`
 - `DatabaseException` and `ServerError` moved to `clickhouse_orm.exceptions` (still importable from `clickhouse_orm.database`)
 - `Database.request_session` is now a read-only property proxying `Database.driver.session`

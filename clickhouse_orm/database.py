@@ -80,6 +80,10 @@ class Database:
         self.codec: Codec = driver.codec
         self.log_statements = log_statements
         self.settings = {}
+        # Lazily created by the optional SQLAlchemy backend (see `engine`, `metadata`, `get_table()`, `query()`)
+        self._sa_engine = None
+        self._sa_metadata = None
+        self._sa_tables = {}
         self.db_exists = False  # this is required before running _is_existing_database
         self.db_exists = self._is_existing_database()
         if readonly:
@@ -135,6 +139,60 @@ class Database:
         if model_class.is_system_model():
             raise DatabaseException("You can't drop system table")
         self._send(model_class.drop_table_sql(self.db_name))
+
+    @property
+    def engine(self):
+        """
+        A lazily-created SQLAlchemy `Engine`, connected via the `clickhouse-connect` SQLAlchemy dialect and reusing
+        this database's HTTP connection settings. Used by `query()` (see `clickhouse_orm.alchemy`).
+
+        Requires the `sqlalchemy` extra (`pip install clickhouse_orm[sqlalchemy]`).
+        """
+        if self._sa_engine is None:
+            from .alchemy import build_engine
+
+            self._sa_engine = build_engine(self)
+        return self._sa_engine
+
+    @property
+    def metadata(self):
+        """The shared SQLAlchemy `MetaData` used by `get_table()`/`query()`."""
+        if self._sa_metadata is None:
+            from .alchemy import sqlalchemy
+
+            self._sa_metadata = sqlalchemy.MetaData()
+        return self._sa_metadata
+
+    def get_table(self, model_class):
+        """
+        Returns the SQLAlchemy Core `Table` matching a model class, building (and caching, on this `Database`
+        instance) it if necessary. See `clickhouse_orm.alchemy.build_table()`.
+        """
+        table = self._sa_tables.get(model_class)
+        if table is None:
+            from .alchemy import build_table
+
+            schema = "system" if model_class.is_system_model() else self.db_name
+            table = build_table(model_class, self.metadata, schema=schema, capabilities=self.capabilities)
+            self._sa_tables[model_class] = table
+        return table
+
+    def query(self, model_class, *entities):
+        """
+        Returns a `ModelSelect`, a SQLAlchemy Core `Select` bound to `model_class`'s table, as an alternative to
+        `model_class.objects_in(self)`. Unlike a `QuerySet`, it is filtered/ordered/joined using plain SQLAlchemy
+        expressions on `Table.c` (e.g. `qs.table.c.value > 10`) rather than `Q`/`funcs`.
+
+        - `model_class`: the model to query; its table is available as `.table` on the returned `ModelSelect`.
+        - `entities`: optional specific columns/expressions to select, instead of the whole table.
+
+        Requires the `sqlalchemy` extra (`pip install clickhouse_orm[sqlalchemy]`).
+        """
+        from .alchemy import ModelSelect, sqlalchemy
+
+        table = self.get_table(model_class)
+        statement = sqlalchemy.select(*entities) if entities else sqlalchemy.select(table)
+        return ModelSelect(statement, self, model_class, table)
 
     def does_table_exist(self, model_class):
         """

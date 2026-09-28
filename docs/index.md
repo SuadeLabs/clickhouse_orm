@@ -16,6 +16,11 @@ To use ClickHouse's native protocol (see [Drivers](models_and_databases.md#drive
 
     pip install clickhouse_orm[native]
 
+To query with [SQLAlchemy Core](sqlalchemy_core.md#sqlalchemy-core-querying-optional) as an alternative to
+`QuerySet`, install the `sqlalchemy` extra:
+
+    pip install clickhouse_orm[sqlalchemy]
+
 ---
 
 [Table of Contents](toc.md) | [Models and Databases >>](models_and_databases.md)
