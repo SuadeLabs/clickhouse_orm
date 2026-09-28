@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from inspect import isclass
 
+from .compiler import *  # noqa: F401, F403
 from .database import *  # noqa: F401, F403
 from .engines import *  # noqa: F401, F403
 from .fields import *  # noqa: F401, F403

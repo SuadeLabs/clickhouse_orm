@@ -175,16 +175,21 @@ invalid values will cause a `ValueError` to be raised.
 Unrecognized field names will cause an `AttributeError`.
 
 
-#### Model.create_table_sql(db)
+#### Model.create_table_sql(db_name, capabilities=None)
 
 
 Returns the SQL statement for creating a table for this model.
 
+- `db_name`: name of the database to create the table in.
+- `capabilities`: a `ServerCapabilities` describing the target server (defaults to a modern server).
 
-#### Model.drop_table_sql(db)
+
+#### Model.drop_table_sql(db_name)
 
 
 Returns the SQL command for deleting this model's table.
+
+- `db_name`: name of the database containing the table.
 
 
 #### Model.fields(writable=False)
@@ -305,16 +310,21 @@ invalid values will cause a `ValueError` to be raised.
 Unrecognized field names will cause an `AttributeError`.
 
 
-#### BufferModel.create_table_sql(db)
+#### BufferModel.create_table_sql(db_name, capabilities=None)
 
 
 Returns the SQL statement for creating a table for this model.
 
+- `db_name`: name of the database to create the table in.
+- `capabilities`: a `ServerCapabilities` describing the target server (defaults to a modern server).
 
-#### BufferModel.drop_table_sql(db)
+
+#### BufferModel.drop_table_sql(db_name)
 
 
 Returns the SQL command for deleting this model's table.
+
+- `db_name`: name of the database containing the table.
 
 
 #### BufferModel.fields(writable=False)
@@ -440,16 +450,21 @@ invalid values will cause a `ValueError` to be raised.
 Unrecognized field names will cause an `AttributeError`.
 
 
-#### MergeModel.create_table_sql(db)
+#### MergeModel.create_table_sql(db_name, capabilities=None)
 
 
 Returns the SQL statement for creating a table for this model.
 
+- `db_name`: name of the database to create the table in.
+- `capabilities`: a `ServerCapabilities` describing the target server (defaults to a modern server).
 
-#### MergeModel.drop_table_sql(db)
+
+#### MergeModel.drop_table_sql(db_name)
 
 
 Returns the SQL command for deleting this model's table.
+
+- `db_name`: name of the database containing the table.
 
 
 #### MergeModel.fields(writable=False)
@@ -573,16 +588,21 @@ invalid values will cause a `ValueError` to be raised.
 Unrecognized field names will cause an `AttributeError`.
 
 
-#### DistributedModel.create_table_sql(db)
+#### DistributedModel.create_table_sql(db_name, capabilities=None)
 
 
 Returns the SQL statement for creating a table for this model.
 
+- `db_name`: name of the database to create the table in.
+- `capabilities`: a `ServerCapabilities` describing the target server (defaults to a modern server).
 
-#### DistributedModel.drop_table_sql(db)
+
+#### DistributedModel.drop_table_sql(db_name)
 
 
 Returns the SQL command for deleting this model's table.
+
+- `db_name`: name of the database containing the table.
 
 
 #### DistributedModel.fields(writable=False)
@@ -3274,10 +3294,13 @@ Unrecognized field names will cause an `AttributeError`.
 Returns: SQL Query
 
 
-#### SystemPart.create_table_sql(db)
+#### SystemPart.create_table_sql(db_name, capabilities=None)
 
 
 Returns the SQL statement for creating a table for this model.
+
+- `db_name`: name of the database to create the table in.
+- `capabilities`: a `ServerCapabilities` describing the target server (defaults to a modern server).
 
 
 #### detach(settings=None)
@@ -3300,10 +3323,12 @@ Delete a partition
 Returns: SQL Query
 
 
-#### SystemPart.drop_table_sql(db)
+#### SystemPart.drop_table_sql(db_name)
 
 
 Returns the SQL command for deleting this model's table.
+
+- `db_name`: name of the database containing the table.
 
 
 #### fetch(zookeeper_path, settings=None)

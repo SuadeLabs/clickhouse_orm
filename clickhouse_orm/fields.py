@@ -10,6 +10,7 @@ from uuid import UUID
 import pytz
 from pytz import BaseTzInfo
 
+from .compiler import resolve_ddl_target
 from .funcs import F, FunctionOperatorsMixin
 from .utils import comma_join, escape, get_subclass_names, parse_array, string_or_func
 
@@ -87,27 +88,34 @@ class Field(FunctionOperatorsMixin):
         """
         return escape(value, quote)
 
-    def get_sql(self, with_default_expression=True, db=None):
+    def get_sql(self, with_default_expression=True, db=None, *, capabilities=None):
         """
         Returns an SQL expression describing the field (e.g. for CREATE TABLE).
 
         - `with_default_expression`: If True, adds default value to sql.
             It doesn't affect fields with alias and materialized values.
-        - `db`: Database, used for checking supported features.
+        - `db`: deprecated, pass `capabilities` instead.
+        - `capabilities`: a `ServerCapabilities` used for checking supported features.
+          When omitted, optional features (codecs, LowCardinality) are not used.
         """
+        if db is not None:
+            _, capabilities = resolve_ddl_target(db, capabilities, "Field.get_sql")
+        return self._get_sql(with_default_expression, capabilities)
+
+    def _get_sql(self, with_default_expression, capabilities):
         sql = self.db_type
         args = self.get_db_type_args()
         if args:
             sql += "(%s)" % comma_join(args)
         if with_default_expression:
-            sql += self._extra_params(db)
+            sql += self._extra_params(capabilities)
         return sql
 
     def get_db_type_args(self):
         """Returns field type arguments"""
         return []
 
-    def _extra_params(self, db):
+    def _extra_params(self, capabilities):
         sql = ""
         if self.alias:
             sql += " ALIAS %s" % string_or_func(self.alias)
@@ -118,7 +126,7 @@ class Field(FunctionOperatorsMixin):
         elif self.default:
             default = self.to_db_string(self.default)
             sql += " DEFAULT %s" % default
-        if self.codec and db and db.has_codec_support and not self.alias:
+        if self.codec and capabilities and capabilities.has_codec_support and not self.alias:
             sql += " CODEC(%s)" % self.codec
         return sql
 
@@ -530,9 +538,9 @@ class ArrayField(Field):
         array = [self.inner_field.to_db_string(v, quote=True) for v in value]
         return "[" + comma_join(array) + "]"
 
-    def get_sql(self, with_default_expression=True, db=None):
-        sql = "Array(%s)" % self.inner_field.get_sql(with_default_expression=False, db=db)
-        if with_default_expression and self.codec and db and db.has_codec_support:
+    def _get_sql(self, with_default_expression, capabilities):
+        sql = "Array(%s)" % self.inner_field._get_sql(False, capabilities)
+        if with_default_expression and self.codec and capabilities and capabilities.has_codec_support:
             sql += " CODEC(%s)" % self.codec
         return sql
 
@@ -617,10 +625,10 @@ class NullableField(Field):
             return "\\N"
         return self.inner_field.to_db_string(value, quote=quote)
 
-    def get_sql(self, with_default_expression=True, db=None):
-        sql = "Nullable(%s)" % self.inner_field.get_sql(with_default_expression=False, db=db)
+    def _get_sql(self, with_default_expression, capabilities):
+        sql = "Nullable(%s)" % self.inner_field._get_sql(False, capabilities)
         if with_default_expression:
-            sql += self._extra_params(db)
+            sql += self._extra_params(capabilities)
         return sql
 
 
@@ -648,16 +656,16 @@ class LowCardinalityField(Field):
     def to_db_string(self, value, quote=True):
         return self.inner_field.to_db_string(value, quote=quote)
 
-    def get_sql(self, with_default_expression=True, db=None):
-        if db and db.has_low_cardinality_support:
-            sql = "LowCardinality(%s)" % self.inner_field.get_sql(with_default_expression=False)
+    def _get_sql(self, with_default_expression, capabilities):
+        if capabilities and capabilities.has_low_cardinality_support:
+            sql = "LowCardinality(%s)" % self.inner_field._get_sql(False, None)
         else:
-            sql = self.inner_field.get_sql(with_default_expression=False)
+            sql = self.inner_field._get_sql(False, None)
             logger.warning(
                 f"LowCardinalityField not supported on clickhouse-server version < 19.0 using {self.inner_field.__class__.__name__} as fallback"
             )
         if with_default_expression:
-            sql += self._extra_params(db)
+            sql += self._extra_params(capabilities)
         return sql
 
 

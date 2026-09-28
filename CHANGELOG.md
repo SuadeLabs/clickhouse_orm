@@ -8,6 +8,23 @@ Unreleased
 - `Database.request_session` is now a read-only property proxying `Database.driver.session`
 - INSERT statements are now logged when `log_statements=True`
 - bugfix: `Database.server_version` no longer drops the final version component
+- DDL generation no longer needs a live `Database`: `Model.create_table_sql(db_name, capabilities=None)`,
+  `Model.drop_table_sql(db_name)`, `Engine.create_table_sql(db_name, capabilities=None)` and
+  `Field.get_sql(with_default_expression=True, *, capabilities=None)`
+- New `ServerCapabilities` (`clickhouse_orm.compiler`) describing optional server features; `Database.capabilities`
+  is derived from the server version. `Database.has_codec_support` / `has_low_cardinality_support` are now read-only
+  properties proxying it
+- `$db` / `$table` substitution moved to `clickhouse_orm.compiler.substitute`; migrations use qualified table names
+- bugfix: pre-1.1.54310 `MergeTree` syntax raised a `TypeError`
+
+**Deprecations / backwards incompatible changes**
+
+- Passing a `Database` to `create_table_sql`, `drop_table_sql`, `Engine.create_table_sql` or `Field.get_sql(db=...)`
+  still works but emits a `DeprecationWarning`
+- Custom subclasses should override the new internal hooks instead of the public methods:
+  `Model._create_table_sql(db_name, capabilities)`, `Engine._create_table_sql(db_name, capabilities)` and
+  `Field._get_sql(with_default_expression, capabilities)`. Overrides of the old public methods that expect a
+  `Database` argument will no longer be called with one
 
 v3.2.0
 ------

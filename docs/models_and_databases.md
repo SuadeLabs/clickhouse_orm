@@ -148,6 +148,16 @@ Using the `Database` instance you can create a table for your model, and insert 
 
 The `insert` method can take any iterable of model instances, but they all must belong to the same model class.
 
+The DDL for a model can also be generated without a database connection, e.g. to review it or to apply it with another tool. By default, the SQL targets a modern ClickHouse server; pass a `ServerCapabilities` instance to disable optional features for older servers:
+
+    from clickhouse_orm import ServerCapabilities
+
+    print(Person.create_table_sql('my_test_db'))
+    print(Person.create_table_sql('my_test_db', ServerCapabilities(has_codec_support=False)))
+    print(Person.drop_table_sql('my_test_db'))
+
+A connected `Database` exposes the capabilities of its server as `db.capabilities`.
+
 Creating a read-only database is also supported. Such a `Database` instance can only read data, and cannot modify data or schemas:
 
     db = Database('my_test_db', readonly=True)

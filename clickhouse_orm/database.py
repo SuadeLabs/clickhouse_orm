@@ -3,10 +3,10 @@ from __future__ import annotations
 import datetime
 import logging
 from math import ceil
-from string import Template
 
 import pytz
 
+from .compiler import ServerCapabilities, qualified_name, substitute
 from .driver import Driver, RequestsDriver
 from .exceptions import DatabaseException, ServerError
 from .models import ModelBase
@@ -74,10 +74,17 @@ class Database:
         self.server_version = self._get_server_version()
         # Versions 1.1.53981 and below don't have timezone function
         self.server_timezone = self._get_server_timezone() if self.server_version > (1, 1, 53981) else pytz.utc
-        # Versions 19.1.16 and above support codec compression
-        self.has_codec_support = self.server_version >= (19, 1, 16)
-        # Version 19.0 and above support LowCardinality
-        self.has_low_cardinality_support = self.server_version >= (19, 0)
+        self.capabilities = ServerCapabilities.from_version(self.server_version)
+
+    @property
+    def has_codec_support(self):
+        """Whether the server supports column compression codecs (19.1.16+)."""
+        return self.capabilities.has_codec_support
+
+    @property
+    def has_low_cardinality_support(self):
+        """Whether the server supports LowCardinality columns (19.0+)."""
+        return self.capabilities.has_low_cardinality_support
 
     def create_database(self):
         """
@@ -101,7 +108,7 @@ class Database:
             raise DatabaseException("You can't create system table")
         if model_class.engine is None:
             raise DatabaseException("%s class must define an engine" % model_class.__name__)
-        self._send(model_class.create_table_sql(self))
+        self._send(model_class.create_table_sql(self.db_name, self.capabilities))
 
     def drop_table(self, model_class):
         """
@@ -109,7 +116,7 @@ class Database:
         """
         if model_class.is_system_model():
             raise DatabaseException("You can't drop system table")
-        self._send(model_class.drop_table_sql(self))
+        self._send(model_class.drop_table_sql(self.db_name))
 
     def does_table_exist(self, model_class):
         """
@@ -129,7 +136,7 @@ class Database:
         - `system_table`: whether the table is a system table, or belongs to the current database
         """
         db_name = "system" if system_table else self.db_name
-        sql = "DESCRIBE `%s`.`%s` FORMAT TSV" % (db_name, table_name)
+        sql = "DESCRIBE %s FORMAT TSV" % qualified_name(db_name, table_name)
         lines = self._send(sql).iter_lines()
         fields = [parse_tsv(line)[:2] for line in lines]
         model = ModelBase.create_ad_hoc_model(fields, table_name)
@@ -351,15 +358,7 @@ class Database:
         """
         Replaces $db and $table placeholders in the query.
         """
-        if "$" in query:
-            mapping = dict(db="`%s`" % self.db_name)
-            if model_class:
-                if model_class.is_system_model():
-                    mapping["table"] = "`system`.`%s`" % model_class.table_name()
-                else:
-                    mapping["table"] = "`%s`.`%s`" % (self.db_name, model_class.table_name())
-            query = Template(query).safe_substitute(mapping)
-        return query
+        return substitute(query, self.db_name, model_class)
 
     def _get_server_timezone(self):
         try:
