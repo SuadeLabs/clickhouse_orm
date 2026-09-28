@@ -12,6 +12,10 @@ To install clickhouse_orm:
 
     pip install clickhouse_orm
 
+To use ClickHouse's native protocol (see [Drivers](models_and_databases.md#drivers)), install the `native` extra:
+
+    pip install clickhouse_orm[native]
+
 ---
 
 [Table of Contents](toc.md) | [Models and Databases >>](models_and_databases.md)

@@ -10,9 +10,10 @@ from typing import TYPE_CHECKING, Any
 
 import pytz
 
-from .fields import BaseEnumField, DateTimeField
+from .compiler import quote_identifier
+from .fields import ArrayField, BaseEnumField, DateTimeField
 from .models import Model, ModelBase
-from .utils import parse_tsv
+from .utils import parse_array, parse_tsv
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Iterator
@@ -47,51 +48,53 @@ class RowResult:
 
 
 class Codec(abc.ABC):
-    """Base class for codecs."""
+    """
+    Base class for codecs. A codec is paired with a driver (see `Driver.codec`): it builds the statements whose data
+    it encodes, and decodes the responses returned by the driver's `send`.
+    """
 
-    #: The ClickHouse format name used in the `FORMAT` clause of SELECT queries.
-    select_format: str
+    #: The ClickHouse format name appended to SELECT queries in a `FORMAT` clause, or `None` to send queries as is.
+    select_format: str | None
 
     @abc.abstractmethod
-    def insert_format(self, model_class: type[Model]) -> str:
-        """Returns the ClickHouse format name used in the `FORMAT` clause when inserting `model_class` instances."""
-
-    @abc.abstractmethod
-    def encode(self, model_class: type[Model], instances: Iterable[Model], batch_size: int = 1000) -> Iterator[bytes]:
+    def encode_inserts(
+        self, model_class: type[Model], instances: Iterable[Model], batch_size: int = 1000
+    ) -> Iterator[tuple[str, Any]]:
         """
-        Serialises model instances into chunks of bytes in the model's insert format.
+        Serialises model instances for insertion. Yields `(statement, data)` pairs, each to be sent to the driver
+        as `send(statement, data=data)`. Statements use the `$table` placeholder for the model's table.
 
         - `model_class`: the model class of all the instances.
         - `instances`: the instances to serialise.
-        - `batch_size`: the maximum number of instances per chunk.
+        - `batch_size`: the maximum number of instances per chunk of data, for codecs which send data in chunks.
         """
 
     @abc.abstractmethod
     def decode(
         self,
-        response_lines: Iterable[bytes],
+        response: Any,
         model_class: type[Model] | None = None,
         timezone: datetime.tzinfo = pytz.utc,
     ) -> Iterator[Model]:
         """
-        Deserialises the lines of a response in the select format into model instances.
+        Deserialises the response to a SELECT query into model instances.
 
-        - `response_lines`: the lines of the response body.
+        - `response`: the response returned by the driver's `send`.
         - `model_class`: the model class matching the query's columns,
           or `None` for getting back instances of an ad-hoc model.
         - `timezone`: the timezone for parsing dates and datetimes. Some fields use their own timezones.
         """
 
     @abc.abstractmethod
-    def decode_rows(self, response_lines: Iterable[bytes], timezone: datetime.tzinfo = pytz.utc) -> RowResult:
+    def decode_rows(self, response: Any, timezone: datetime.tzinfo = pytz.utc) -> RowResult:
         """
-        Deserialises the lines of a response in the select format into a `RowResult`.
+        Deserialises the response to a SELECT query into a `RowResult`.
 
         Values use the same Python types as `clickhouse_driver`, so that results do not depend on the driver.
         In particular, `DateTime` columns without an explicit timezone are returned as naive datetimes in
         `timezone` (the server's timezone), and enums are returned as their names.
 
-        - `response_lines`: the lines of the response body.
+        - `response`: the response returned by the driver's `send`.
         - `timezone`: the timezone for parsing dates and datetimes. Some columns use their own timezones.
         """
 
@@ -100,15 +103,23 @@ class TSVCodec(Codec):
     """
     A codec using ClickHouse's tab-separated formats: `TabSeparatedWithNamesAndTypes` for reading,
     and `TabSeparated` (or `TSKV` for models with function expressions as defaults) for writing.
+    Responses must provide `iter_lines()` (see `DriverResponse`), and insert data is sent as chunks of bytes.
     """
 
     select_format = "TabSeparatedWithNamesAndTypes"
 
-    def insert_format(self, model_class):
+    def insert_format(self, model_class: type[Model]) -> str:
+        """Returns the ClickHouse format name used when inserting `model_class` instances."""
         # TSKV lets ClickHouse evaluate defaults for fields omitted from the row
         return "TSKV" if model_class.has_funcs_as_defaults() else "TabSeparated"
 
-    def encode(self, model_class, instances, batch_size=1000):
+    def encode_inserts(self, model_class, instances, batch_size=1000):
+        fields_list = ",".join(quote_identifier(name) for name in model_class.fields(writable=True))
+        statement = "INSERT INTO $table (%s) FORMAT %s" % (fields_list, self.insert_format(model_class))
+        yield statement, self.encode(model_class, instances, batch_size)
+
+    def encode(self, model_class: type[Model], instances: Iterable[Model], batch_size: int = 1000) -> Iterator[bytes]:
+        """Serialises model instances into chunks of at most `batch_size` lines in the model's insert format."""
         buf = BytesIO()
         lines = 0
         for instance in instances:
@@ -121,8 +132,8 @@ class TSVCodec(Codec):
         if lines:
             yield buf.getvalue()
 
-    def decode(self, response_lines, model_class=None, timezone=pytz.utc):
-        lines = iter(response_lines)
+    def decode(self, response, model_class=None, timezone=pytz.utc):
+        lines = response.iter_lines()
         field_names = parse_tsv(next(lines))
         field_types = parse_tsv(next(lines))
         model_class = model_class or ModelBase.create_ad_hoc_model(zip(field_names, field_types))
@@ -131,8 +142,8 @@ class TSVCodec(Codec):
             if line:
                 yield model_class.from_tsv(line, field_names, timezone)
 
-    def decode_rows(self, response_lines, timezone=pytz.utc):
-        lines = iter(response_lines)
+    def decode_rows(self, response, timezone=pytz.utc):
+        lines = response.iter_lines()
         columns = list(zip(parse_tsv(next(lines)), parse_tsv(next(lines))))
         converters = [_row_converter(db_type, timezone) for _, db_type in columns]
         return RowResult(columns, self._iter_rows(lines, converters))
@@ -204,6 +215,14 @@ def _row_converter(db_type: str, timezone: datetime.tzinfo) -> Callable[[bytes],
     except (NotImplementedError, AssertionError):
         # Unsupported types (e.g. nested arrays) are rejected by the field classes with either exception
         return _decode_string
+    if isinstance(field, ArrayField):
+        # Convert the elements like values of the inner type (e.g. enums to names and datetimes to naive datetimes)
+        inner_type = db_type[len("Array(") : -1]
+        convert = _row_converter(inner_type, timezone)
+        nullable = field.inner_field._is_nullable()
+        return lambda value: [
+            None if nullable and item == "NULL" else convert(item.encode()) for item in parse_array(value.decode())
+        ]
     if isinstance(field, BaseEnumField):
         return lambda value: field.to_python(value.decode(), timezone).name
     if isinstance(field, DateTimeField):

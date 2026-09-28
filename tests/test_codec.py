@@ -4,6 +4,7 @@ import datetime
 import unittest
 from unittest import mock
 
+import pytest
 import pytz
 
 from clickhouse_orm.codec import Codec, RowResult, TSVCodec
@@ -14,6 +15,11 @@ from clickhouse_orm.funcs import F
 from clickhouse_orm.models import Model
 
 from .base_test_with_data import Person, TestCaseWithData
+
+
+def _response(lines):
+    """A response with the given body lines, as returned by `RequestsDriver`."""
+    return mock.Mock(iter_lines=mock.Mock(return_value=iter(lines)))
 
 
 class TSVCodecTestCase(unittest.TestCase):
@@ -28,6 +34,12 @@ class TSVCodecTestCase(unittest.TestCase):
         self.assertEqual(self.codec.select_format, "TabSeparatedWithNamesAndTypes")
         self.assertEqual(self.codec.insert_format(Row), "TabSeparated")
         self.assertEqual(self.codec.insert_format(RowWithFuncDefault), "TSKV")
+
+    def test_encode_inserts(self):
+        rows = [Row(name="a", num=1)]
+        ((statement, data),) = self.codec.encode_inserts(Row, rows)
+        self.assertEqual(statement, "INSERT INTO $table (`name`,`num`) FORMAT TabSeparated")
+        self.assertEqual(list(data), [b"a\t1\n"])
 
     def test_encode(self):
         rows = [Row(name="a\tb", num=1), Row(name="c", num=2)]
@@ -60,19 +72,19 @@ class TSVCodecTestCase(unittest.TestCase):
 
     def test_decode(self):
         lines = [b"num\tname", b"Int32\tString", b"1\ta\\tb", b"", b"2\tc"]
-        rows = list(self.codec.decode(lines, Row))
+        rows = list(self.codec.decode(_response(lines), Row))
         self.assertEqual([(r.name, r.num) for r in rows], [("a\tb", 1), ("c", 2)])
         self.assertTrue(all(isinstance(r, Row) for r in rows))
 
     def test_decode_ad_hoc_model(self):
         lines = [b"x\ty", b"UInt8\tString", b"5\thello"]
-        (row,) = self.codec.decode(lines)
+        (row,) = self.codec.decode(_response(lines))
         self.assertEqual((row.x, row.y), (5, "hello"))
         self.assertNotIsInstance(row, Row)
 
     def test_decode_timezone(self):
         lines = [b"ts", b"DateTime", b"2020-01-01 12:00:00"]
-        (row,) = self.codec.decode(lines, WithDateTime, pytz.timezone("Asia/Jerusalem"))
+        (row,) = self.codec.decode(_response(lines), WithDateTime, pytz.timezone("Asia/Jerusalem"))
         self.assertEqual(row.ts, datetime.datetime(2020, 1, 1, 10, 0, tzinfo=pytz.utc))
 
 
@@ -90,7 +102,7 @@ class TSVCodecRowsTestCase(unittest.TestCase):
 
     def setUp(self):
         self.tz = pytz.timezone("Asia/Jerusalem")
-        self.result = TSVCodec().decode_rows(ROWS_RESPONSE, self.tz)
+        self.result = TSVCodec().decode_rows(_response(ROWS_RESPONSE), self.tz)
 
     def test_columns(self):
         self.assertIsInstance(self.result, RowResult)
@@ -121,40 +133,54 @@ class TSVCodecRowsTestCase(unittest.TestCase):
         self.assertIsNone(row[0].tzinfo)
         self.assertIs(type(row), tuple)
 
+    def test_array_elements(self):
+        lines = [
+            b"e\td\tn\ts",
+            b"Array(Enum8(\\'a\\' = 1, \\'b\\' = 2))\tArray(DateTime)\tArray(Nullable(UInt8))\tArray(String)",
+            b"['a','b']\t['2020-01-01 12:00:00']\t[1,NULL]\t['x','y z']",
+        ]
+        ((enums, datetimes, nullables, strings),) = TSVCodec().decode_rows(_response(lines), self.tz)
+        self.assertEqual(enums, ["a", "b"])
+        self.assertEqual(datetimes, [datetime.datetime(2020, 1, 1, 12, 0)])
+        self.assertEqual(nullables, [1, None])
+        self.assertEqual(strings, ["x", "y z"])
+
     def test_explicit_timezone_column(self):
         lines = [b"dt", b"DateTime(\\'Asia/Tokyo\\')", b"2020-01-01 12:00:00"]
-        ((value,),) = TSVCodec().decode_rows(lines)
+        ((value,),) = TSVCodec().decode_rows(_response(lines))
         self.assertEqual(value, pytz.timezone("Asia/Tokyo").localize(datetime.datetime(2020, 1, 1, 12, 0)))
         self.assertEqual(value.tzinfo.zone, "Asia/Tokyo")
 
     def test_duplicate_column_names(self):
-        result = TSVCodec().decode_rows([b"1\t1", b"UInt8\tUInt8", b"1\t1"])
+        result = TSVCodec().decode_rows(_response([b"1\t1", b"UInt8\tUInt8", b"1\t1"]))
         self.assertEqual(result.columns, [("1", "UInt8"), ("1", "UInt8")])
         self.assertEqual(list(result), [(1, 1)])
 
     def test_empty_result_and_totals(self):
-        result = TSVCodec().decode_rows([b"k\tc", b"UInt8\tUInt64", b"0\t2", b"1\t2", b"", b"0\t4"])
+        result = TSVCodec().decode_rows(_response([b"k\tc", b"UInt8\tUInt64", b"0\t2", b"1\t2", b"", b"0\t4"]))
         self.assertEqual(list(result), [(0, 2), (1, 2), (0, 4)])
-        result = TSVCodec().decode_rows([b"x", b"UInt8"])
+        result = TSVCodec().decode_rows(_response([b"x", b"UInt8"]))
         self.assertEqual((result.columns, list(result)), ([("x", "UInt8")], []))
 
     def test_unsupported_types_as_text(self):
         lines = [b"m\tnested", b"Map(String, UInt8)\tArray(Array(UInt8))", b"{'a':1}\t[[1],[2]]"]
-        self.assertEqual(list(TSVCodec().decode_rows(lines)), [("{'a':1}", "[[1],[2]]")])
+        self.assertEqual(list(TSVCodec().decode_rows(_response(lines))), [("{'a':1}", "[[1],[2]]")])
 
     def test_is_lazy(self):
         def lines():
             yield from ROWS_RESPONSE[:2]
             raise AssertionError("rows should not be read before iteration")
 
-        result = TSVCodec().decode_rows(lines())
+        result = TSVCodec().decode_rows(_response(lines()))
         self.assertEqual(len(result.columns), 12)
 
 
 class DatabaseCodecTestCase(TestCaseWithData):
+    @pytest.mark.http_only
     def test_default_codec(self):
         self.assertIsInstance(self.database.codec, TSVCodec)
 
+    @pytest.mark.http_only
     def test_insert_and_select_use_codec(self):
         codec = self.database.codec
         with (

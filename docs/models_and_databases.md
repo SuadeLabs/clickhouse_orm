@@ -223,6 +223,7 @@ Values use the same Python types as `clickhouse_driver`:
 - `Enum` values are returned as their name (`str`), `Bool` as `bool`, `Nullable` NULLs as `None`
 - `FixedString` values have trailing null bytes removed; strings which are not valid UTF-8 are returned as `bytes`
 - Types which are not parsed yet (`Tuple`, `Map`, nested arrays, `JSON`, ...) are returned as their text representation
+  (the [native driver](#the-native-driver) returns them as Python objects)
 
 SQL Placeholders
 ----------------
@@ -297,6 +298,85 @@ You can optionally pass conditions to the query:
 
 Note that `order_by` must be chosen so that the ordering is unique, otherwise there might be inconsistencies in the pagination (such as an instance that appears on two different pages).
 
+
+Drivers
+-------
+
+A `Database` talks to ClickHouse through a driver. By default it creates a `RequestsDriver`, which uses the HTTP
+interface (with the `db_url`, `username`, `password`, `timeout` and `verify_ssl_cert` arguments) and exchanges data
+in the `TabSeparated` format. To use another driver, pass it as `driver` instead of the connection arguments:
+
+    db = Database('my_test_db', driver=my_driver)
+
+### The native driver
+
+`NativeDriver` uses ClickHouse's native TCP protocol, via the [clickhouse-driver](https://clickhouse-driver.readthedocs.io)
+library. It is installed with the `native` extra, and must be imported from `clickhouse_orm.native`:
+
+    pip install clickhouse_orm[native]
+
+    from clickhouse_orm.native import NativeDriver
+
+    db = Database('my_test_db', driver=NativeDriver('localhost', port=9000, user='me', password='secret'))
+    db = Database('my_test_db', driver=NativeDriver.from_url('clickhouse://me:secret@localhost:9000'))
+
+Other keyword arguments (such as `secure`, `compression` or `settings`) are passed to `clickhouse_driver.Client`.
+Values are sent and received in ClickHouse's binary format rather than as text, and the rest of the ORM works as
+with the default driver. The differences are:
+
+- Results are read in full before they are returned, so large results are held in memory. Like
+  `clickhouse_driver.Client`, a driver must not be used by several threads at once.
+- `raw` returns an approximation of the `TabSeparated` output, and any `FORMAT` clause in the query is ignored.
+- `select_rows` returns values of every type as Python objects (e.g. tuples, dicts and nested lists), where the
+  default driver returns the text of types it does not parse.
+- The `batch_size` of `insert` is ignored, since `clickhouse_driver` splits the rows into blocks itself.
+- Query parameters require a server version which supports them over the native protocol; older servers raise
+  a `DatabaseException`.
+
+### Custom drivers
+
+Other drivers can be written by subclassing `clickhouse_orm.driver.Driver` and implementing `send`. It receives
+the SQL statement, the insert data (if any), the query settings, and the values of the query parameters in
+ClickHouse's escaped text format. `Database` passes the name of its database in the settings as `database`, and
+expects server errors to be raised as `ServerError`.
+
+A driver's `codec` class attribute determines the data it exchanges. The default, `TSVCodec`, sends insert data
+as an iterable of `TabSeparated` byte chunks, and needs responses with a `text` property and an `iter_lines()`
+method (see `DriverResponse`). For example, a driver using the HTTP interface via the standard library:
+
+    from urllib.error import HTTPError
+    from urllib.parse import urlencode
+    from urllib.request import urlopen
+
+    from clickhouse_orm.driver import Driver
+    from clickhouse_orm.exceptions import ServerError
+
+    class UrllibResponse:
+        def __init__(self, text):
+            self.text = text
+
+        def iter_lines(self):
+            return iter(self.text.encode().splitlines())
+
+    class UrllibDriver(Driver):
+        def __init__(self, url):
+            self.url = url
+
+        def send(self, query, data=None, settings=None, stream=False, params=None):
+            url_params = dict(settings or {})
+            url_params.update(('param_' + name, value) for name, value in (params or {}).items())
+            if data is None:
+                body = query.encode()
+            else:
+                url_params['query'] = query
+                body = b''.join(data)
+            try:
+                with urlopen(self.url + '?' + urlencode(url_params), data=body) as response:
+                    return UrllibResponse(response.read().decode())
+            except HTTPError as e:
+                raise ServerError(e.read().decode())
+
+    db = Database('my_test_db', driver=UrllibDriver('http://localhost:8123/'))
 
 ---
 

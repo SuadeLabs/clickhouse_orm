@@ -10,14 +10,14 @@ clickhouse_orm.database
 Database instances connect to a specific ClickHouse database for running queries,
 inserting data and other operations.
 
-#### Database(db_name, db_url="http://localhost:8123/", username=None, password=None, readonly=False, autocreate=True, timeout=60, verify_ssl_cert=True, log_statements=False)
+#### Database(db_name, db_url=None, username=None, password=None, readonly=False, autocreate=True, timeout=60, verify_ssl_cert=True, log_statements=False, driver=None)
 
 
 Initializes a database instance. Unless it's readonly, the database will be
 created on the ClickHouse server if it does not already exist.
 
 - `db_name`: name of the database to connect to.
-- `db_url`: URL of the ClickHouse server.
+- `db_url`: URL of the ClickHouse server's HTTP interface.
 - `username`: optional connection credentials.
 - `password`: optional connection credentials.
 - `readonly`: use a read-only connection.
@@ -25,6 +25,8 @@ created on the ClickHouse server if it does not already exist.
 - `timeout`: the connection timeout in seconds.
 - `verify_ssl_cert`: whether to verify the server's certificate when connecting via HTTPS.
 - `log_statements`: when True, all database statements are logged.
+- `driver`: the `Driver` used to communicate with the server. Defaults to a `RequestsDriver` configured by
+  `db_url`, `username`, `password`, `timeout` and `verify_ssl_cert`, which only apply to the default driver.
 
 
 #### add_setting(name, value)
@@ -146,14 +148,19 @@ Performs a query and returns a generator of model instances.
 - `model_class`: the model class matching the query's table,
   or `None` for getting back instances of an ad-hoc model.
 - `settings`: query settings to send as HTTP GET parameters
-- `params`: values for `{name:Type}` placeholders in the query
+- `params`: values for `{name:Type}` placeholders in the query (see "Query Parameters")
 
 
 #### select_rows(query, settings=None, params=None)
 
 
-Performs a query and returns a `RowResult`: the `(name, type)` column metadata
-plus a single-use iterator of plain tuples, typed like `clickhouse_driver` rows.
+Performs a query and returns a `RowResult`: its `columns` attribute lists the `(name, type)`
+of each column, and iterating over it yields each row as a plain tuple.
+
+Unlike `select`, no model instances are created. Values use the same Python types as
+`clickhouse_driver` (e.g. `DateTime` columns without a timezone are naive datetimes in the
+server's timezone, and enums are returned as their names). Rows are streamed from the server,
+so the result can only be iterated once.
 
 - `query`: the SQL query to execute.
 - `settings`: query settings to send as HTTP GET parameters
@@ -166,6 +173,102 @@ Extends Exception
 
 
 Raised when a database operation fails.
+
+clickhouse_orm.driver
+---------------------
+
+### Driver
+
+Extends ABC
+
+
+Base class for ClickHouse drivers. Subclasses implement `send`; see "Custom Drivers" in the documentation.
+
+A driver is paired with the `codec` that understands its responses and produces its insert data. The default,
+`TSVCodec`, works with drivers whose responses provide `text` and `iter_lines()` (see `DriverResponse`) and which
+accept insert data as bytes.
+
+#### scalar(query, data=None, settings=None, params=None)
+
+Sends a query to the ClickHouse server and returns the response text, stripped of whitespace.
+
+
+#### send(query, data=None, settings=None, stream=False, params=None)
+
+
+Sends a query to the ClickHouse server and returns the response.
+
+- `query`: the SQL statement to execute.
+- `data`: optional payload for the statement (e.g. rows for an INSERT statement), as produced by
+  `self.codec.encode_inserts`. For `TSVCodec` it is an iterable of byte chunks, for streaming large inserts.
+- `settings`: query settings to send along with the query. `Database` also passes the name of its database
+  here as `database` (once the database exists), which the driver must use for unqualified table names.
+- `stream`: if true, the response body is streamed rather than read eagerly (drivers may ignore this).
+- `params`: values for the query's `{name:Type}` placeholders, already encoded in ClickHouse's
+  escaped text format (see `clickhouse_orm.params.format_param`).
+
+Raises `ServerError` if the server reports an error.
+
+
+### RequestsDriver
+
+Extends Driver
+
+A ClickHouse driver that uses the HTTP interface via the requests library.
+
+#### RequestsDriver(url, username=None, password=None, timeout=60, verify_ssl_cert=True)
+
+
+#### scalar(query, data=None, settings=None, params=None)
+
+Sends a query to the ClickHouse server and returns the response text, stripped of whitespace.
+
+
+#### send(query, data=None, settings=None, stream=False, params=None)
+
+
+### NativeDriver
+
+Extends Driver
+
+
+A ClickHouse driver using the native TCP protocol, via `clickhouse_driver.Client`.
+
+Results are read in full before they are returned (`stream` is ignored), which allows running other queries while
+iterating over them. Like `clickhouse_driver.Client`, a driver must not be used by several threads at once.
+
+#### NativeDriver(host="localhost", **client_kwargs)
+
+
+- `host`: the server's hostname.
+- `client_kwargs`: other arguments of `clickhouse_driver.Client`, such as `port`, `user`, `password`,
+  `secure` or `settings`. The database is chosen by `Database`, so `database` cannot be given.
+
+
+#### client(database=None)
+
+Returns the `clickhouse_driver.Client` connected to `database`, or to the user's default database.
+
+
+#### disconnect()
+
+Closes all connections to the server.
+
+
+#### NativeDriver.from_url(url)
+
+
+Creates a driver from a URL, e.g. `clickhouse://user:password@localhost:9000`.
+See `clickhouse_driver.Client.from_url` for the supported URLs. Any database in the URL is ignored.
+
+
+#### scalar(query, data=None, settings=None, params=None)
+
+Sends a query to the ClickHouse server and returns the response text, stripped of whitespace.
+
+
+#### send(query, data=None, settings=None, stream=False, params=None)
+
 
 clickhouse_orm.models
 ---------------------
@@ -263,6 +366,8 @@ Returns true if the model represents a system table.
 
 
 Returns a `QuerySet` for selecting instances of this model class.
+
+- `database`: the `Database` (or any other `Executor`) which runs the queries.
 
 
 #### set_database(db)
@@ -398,6 +503,8 @@ Returns true if the model represents a system table.
 
 
 Returns a `QuerySet` for selecting instances of this model class.
+
+- `database`: the `Database` (or any other `Executor`) which runs the queries.
 
 
 #### set_database(db)
@@ -538,6 +645,8 @@ Returns true if the model represents a system table.
 
 
 Returns a `QuerySet` for selecting instances of this model class.
+
+- `database`: the `Database` (or any other `Executor`) which runs the queries.
 
 
 #### set_database(db)
@@ -709,6 +818,8 @@ Returns true if the model represents a system table.
 
 
 Returns a `QuerySet` for selecting instances of this model class.
+
+- `database`: the `Database` (or any other `Executor`) which runs the queries.
 
 
 #### set_database(db)
@@ -1185,6 +1296,9 @@ A queryset is an object that represents a database query using a specific `Model
 It is lazy, meaning that it does not hit the database until you iterate over its
 matching rows (model instances).
 
+Building the query is pure SQL generation; running it is delegated to an `Executor`
+(normally a `Database`).
+
 #### QuerySet(model_cls, executor)
 
 
@@ -1315,13 +1429,13 @@ The result is a namedtuple containing `objects` (list), `number_of_objects`,
 `pages_total`, `number` (of the current page), and `page_size`.
 
 
-
 #### parameterized(enabled=True)
 
 
 Returns a copy of this queryset which sends filter values and function arguments to the server as
 query parameters (`{name:Type}` placeholders) rather than inlining them into the SQL.
 This also applies to any subquery used by the queryset.
+
 
 #### select_fields_as_sql()
 
@@ -1369,7 +1483,15 @@ This method is not supported on `AggregateQuerySet`.
 #### as_sql()
 
 
-Returns the whole query as a SQL string.
+Returns the whole query as a SQL string, with all values inlined
+(unless called while compiling a parameterized query).
+
+
+#### as_sql_with_params()
+
+
+Returns the whole query as a `(sql, params)` pair, where values are bound as query parameters.
+`params` maps parameter names to `EncodedParam` values, as accepted by `Database.select`.
 
 
 #### conditions_as_sql(prewhere=False)
@@ -1465,6 +1587,14 @@ partitioning of records into pages.
 
 The result is a namedtuple containing `objects` (list), `number_of_objects`,
 `pages_total`, `number` (of the current page), and `page_size`.
+
+
+#### parameterized(enabled=True)
+
+
+Returns a copy of this queryset which sends filter values and function arguments to the server as
+query parameters (`{name:Type}` placeholders) rather than inlining them into the SQL.
+This also applies to any subquery used by the queryset.
 
 
 #### select_fields_as_sql()
@@ -2771,6 +2901,42 @@ Initializer.
 #### startsWith(prefix)
 
 
+#### stddevPop(**kwargs)
+
+
+#### stddevPopIf(cond)
+
+
+#### stddevPopOrDefault()
+
+
+#### stddevPopOrDefaultIf(cond)
+
+
+#### stddevPopOrNull()
+
+
+#### stddevPopOrNullIf(cond)
+
+
+#### stddevSamp(**kwargs)
+
+
+#### stddevSampIf(cond)
+
+
+#### stddevSampOrDefault()
+
+
+#### stddevSampOrDefaultIf(cond)
+
+
+#### stddevSampOrNull()
+
+
+#### stddevSampOrNullIf(cond)
+
+
 #### substring(**kwargs)
 
 
@@ -3464,6 +3630,8 @@ Returns true if the model represents a system table.
 
 
 Returns a `QuerySet` for selecting instances of this model class.
+
+- `database`: the `Database` (or any other `Executor`) which runs the queries.
 
 
 #### set_database(db)

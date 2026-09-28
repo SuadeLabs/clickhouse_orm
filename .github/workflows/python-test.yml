@@ -47,7 +47,7 @@ jobs:
     # config file after git checkout
     - name: Start ClickHouse with cluster config
       run: |
-        docker run -d --rm --name ch -p 8123:8123 -e CLICKHOUSE_SKIP_USER_SETUP=1 \
+        docker run -d --rm --name ch -p 8123:8123 -p 9000:9000 -e CLICKHOUSE_SKIP_USER_SETUP=1 \
           -v "$GITHUB_WORKSPACE/tests/remote-servers.xml:/etc/clickhouse-server/config.d/remote_servers.xml:ro" \
           clickhouse/clickhouse-server:25.8
     - name: Set up Python ${{ matrix.python-version }}
@@ -60,6 +60,9 @@ jobs:
     - name: Test with pytest
       run: |
         pytest .
+    - name: Test with pytest (native driver)
+      run: |
+        pytest . --driver=native
 
   test_compat_21_3:
     # Tests compatibility with an older LTS release of clickhouse
@@ -69,6 +72,7 @@ jobs:
         image: yandex/clickhouse-server:21.3
         ports:
           - 8123:8123
+          - 9000:9000
     strategy:
       fail-fast: false
       matrix:
@@ -95,6 +99,7 @@ jobs:
         image: yandex/clickhouse-server:20.8
         ports:
           - 8123:8123
+          - 9000:9000
     strategy:
       fail-fast: false
       matrix:

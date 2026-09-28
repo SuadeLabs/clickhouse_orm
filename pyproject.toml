@@ -31,7 +31,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+native = [
+  "clickhouse-driver>=0.2.7",
+]
 dev = [
+  "clickhouse-driver==0.2.10",
   "docker==7.1.0",
   "pytest==9.0.2",
   "ruff==0.14.14",

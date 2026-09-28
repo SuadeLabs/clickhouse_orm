@@ -4,16 +4,19 @@ import datetime
 import logging
 from itertools import chain
 from math import ceil
+from typing import TYPE_CHECKING
 
 import pytz
 
-from .codec import Codec, TSVCodec
-from .compiler import ServerCapabilities, qualified_name, quote_identifier, substitute
+from .compiler import ServerCapabilities, qualified_name, substitute
 from .driver import Driver, RequestsDriver
 from .exceptions import DatabaseException, ServerError
 from .models import ModelBase
 from .params import encode_params
 from .utils import Page, import_submodules
+
+if TYPE_CHECKING:
+    from .codec import Codec
 
 logger = logging.getLogger("clickhouse_orm")
 
@@ -37,13 +40,14 @@ class Database:
         timeout=60,
         verify_ssl_cert=True,
         log_statements=False,
+        driver=None,
     ):
         """
         Initializes a database instance. Unless it's readonly, the database will be
         created on the ClickHouse server if it does not already exist.
 
         - `db_name`: name of the database to connect to.
-        - `db_url`: URL of the ClickHouse server.
+        - `db_url`: URL of the ClickHouse server's HTTP interface.
         - `username`: optional connection credentials.
         - `password`: optional connection credentials.
         - `readonly`: use a read-only connection.
@@ -51,19 +55,29 @@ class Database:
         - `timeout`: the connection timeout in seconds.
         - `verify_ssl_cert`: whether to verify the server's certificate when connecting via HTTPS.
         - `log_statements`: when True, all database statements are logged.
+        - `driver`: the `Driver` used to communicate with the server. Defaults to a `RequestsDriver` configured by
+          `db_url`, `username`, `password`, `timeout` and `verify_ssl_cert`, which only apply to the default driver.
         """
         self.db_name = db_name
-        self.db_url = db_url or self._default_url
         self.readonly = False
         self.timeout = timeout
-        self.driver: Driver = RequestsDriver(
-            self.db_url,
-            username=username,
-            password=password,
-            timeout=timeout,
-            verify_ssl_cert=verify_ssl_cert,
-        )
-        self.codec: Codec = TSVCodec()
+        if driver is None:
+            self.db_url = db_url or self._default_url
+            driver = RequestsDriver(
+                self.db_url,
+                username=username,
+                password=password,
+                timeout=timeout,
+                verify_ssl_cert=verify_ssl_cert,
+            )
+        elif db_url or username or password:
+            raise ValueError(
+                "db_url, username and password configure the default driver, and cannot be used with driver"
+            )
+        else:
+            self.db_url = None
+        self.driver: Driver = driver
+        self.codec: Codec = driver.codec
         self.log_statements = log_statements
         self.settings = {}
         self.db_exists = False  # this is required before running _is_existing_database
@@ -178,11 +192,9 @@ class Database:
         if first_instance.is_read_only() or first_instance.is_system_model():
             raise DatabaseException("You can't insert into read only and system tables")
 
-        fields_list = ",".join(quote_identifier(name) for name in model_class.fields(writable=True))
-        fmt = self.codec.insert_format(model_class)
-        query = self._substitute("INSERT INTO $table (%s) FORMAT %s" % (fields_list, fmt), model_class)
         instances = self._attach(chain([first_instance], i))
-        self._send(query, data=self.codec.encode(model_class, instances, batch_size))
+        for statement, data in self.codec.encode_inserts(model_class, instances, batch_size):
+            self._send(self._substitute(statement, model_class), data=data)
 
     def count(self, model_class, conditions=None, params=None):
         """
@@ -213,10 +225,9 @@ class Database:
         - `settings`: query settings to send as HTTP GET parameters
         - `params`: values for `{name:Type}` placeholders in the query (see "Query Parameters")
         """
-        query += " FORMAT " + self.codec.select_format
-        query = self._substitute(query, model_class)
+        query = self._substitute(self._with_select_format(query), model_class)
         r = self._send(query, settings=settings, stream=True, params=params)
-        yield from self._attach(self.codec.decode(r.iter_lines(), model_class, self.server_timezone))
+        yield from self._attach(self.codec.decode(r, model_class, self.server_timezone))
 
     def select_rows(self, query, settings=None, params=None):
         """
@@ -232,10 +243,9 @@ class Database:
         - `settings`: query settings to send as HTTP GET parameters
         - `params`: values for `{name:Type}` placeholders in the query
         """
-        query += " FORMAT " + self.codec.select_format
-        query = self._substitute(query, None)
+        query = self._substitute(self._with_select_format(query), None)
         r = self._send(query, settings=settings, stream=True, params=params)
-        return self.codec.decode_rows(r.iter_lines(), self.server_timezone)
+        return self.codec.decode_rows(r, self.server_timezone)
 
     def raw(self, query, settings=None, stream=False, params=None):
         """
@@ -330,6 +340,9 @@ class Database:
     def request_session(self):
         """The `requests.Session` used by the default `RequestsDriver`. Kept for backwards compatibility."""
         return self.driver.session
+
+    def _with_select_format(self, query):
+        return query + " FORMAT " + self.codec.select_format if self.codec.select_format else query
 
     def _attach(self, instances):
         """Lazily sets this database on each model instance as it is consumed."""

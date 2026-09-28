@@ -4,17 +4,19 @@ from __future__ import annotations
 
 import abc
 from collections.abc import Iterable, Iterator, Mapping
-from typing import Protocol
+from typing import Any, Protocol
 
 import requests
 
+from .codec import Codec, TSVCodec
 from .exceptions import ServerError
 
+#: The insert data sent by `RequestsDriver`: the request body, or an iterable of chunks streamed as the body.
 InsertData = bytes | Iterable[bytes]
 
 
 class DriverResponse(Protocol):
-    """The minimal interface of a response returned by `Driver.send`."""
+    """The interface of a response returned by `Driver.send`. `iter_lines` is only required by `TSVCodec`."""
 
     @property
     def text(self) -> str:
@@ -27,13 +29,22 @@ class DriverResponse(Protocol):
 
 
 class Driver(abc.ABC):
-    """Base class for ClickHouse drivers."""
+    """
+    Base class for ClickHouse drivers. Subclasses implement `send`; see "Custom Drivers" in the documentation.
+
+    A driver is paired with the `codec` that understands its responses and produces its insert data. The default,
+    `TSVCodec`, works with drivers whose responses provide `text` and `iter_lines()` (see `DriverResponse`) and which
+    accept insert data as bytes.
+    """
+
+    #: The codec used by `Database` for the data sent to and received from this driver.
+    codec: Codec = TSVCodec()
 
     @abc.abstractmethod
     def send(
         self,
         query: str,
-        data: InsertData | None = None,
+        data: Any = None,
         settings: Mapping[str, str] | None = None,
         stream: bool = False,
         params: Mapping[str, str] | None = None,
@@ -42,10 +53,11 @@ class Driver(abc.ABC):
         Sends a query to the ClickHouse server and returns the response.
 
         - `query`: the SQL statement to execute.
-        - `data`: optional payload for the statement (e.g. rows for an `INSERT ... FORMAT ...` query).
-          May be an iterable of byte chunks for streaming large inserts.
-        - `settings`: query settings to send along with the query.
-        - `stream`: if true, the response body is streamed rather than read eagerly.
+        - `data`: optional payload for the statement (e.g. rows for an INSERT statement), as produced by
+          `self.codec.encode_inserts`. For `TSVCodec` it is an iterable of byte chunks, for streaming large inserts.
+        - `settings`: query settings to send along with the query. `Database` also passes the name of its database
+          here as `database` (once the database exists), which the driver must use for unqualified table names.
+        - `stream`: if true, the response body is streamed rather than read eagerly (drivers may ignore this).
         - `params`: values for the query's `{name:Type}` placeholders, already encoded in ClickHouse's
           escaped text format (see `clickhouse_orm.params.format_param`).
 
@@ -55,7 +67,7 @@ class Driver(abc.ABC):
     def scalar(
         self,
         query: str,
-        data: InsertData | None = None,
+        data: Any = None,
         settings: Mapping[str, str] | None = None,
         params: Mapping[str, str] | None = None,
     ) -> str:
@@ -104,4 +116,4 @@ class RequestsDriver(Driver):
         return r
 
 
-__all__ = ["Driver", "DriverResponse", "RequestsDriver"]
+__all__ = ["Driver", "DriverResponse", "InsertData", "RequestsDriver"]

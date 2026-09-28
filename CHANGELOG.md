@@ -31,6 +31,13 @@ Unreleased
 - bugfix: `DateTimeField.to_python` ignored `timezone_in_use` for naive `datetime` / `date` values
 - New `Database.select_rows(query, settings=None)` returning a `RowResult` of plain tuples plus `(name, type)`
   column metadata, with values typed like `clickhouse_driver` (see "Reading Rows" in the docs)
+- Pluggable drivers: `Database(db_name, driver=...)` uses any `Driver` subclass instead of the default
+  `RequestsDriver` (see "Drivers" in the docs). A driver's `codec` attribute selects its `Codec`
+- New optional `NativeDriver` (`clickhouse_orm.native`) using the native TCP protocol via `clickhouse-driver`;
+  install with `pip install clickhouse_orm[native]`
+- The test suite can be run against the native driver with `pytest --driver=native`
+- bugfix: deep-copying a `QuerySet` (e.g. when used as a subquery filter) no longer copies its database
+- bugfix: `select_rows` array elements are now typed like `clickhouse_driver` (e.g. enum names, naive datetimes)
 
 **Deprecations / backwards incompatible changes**
 
@@ -40,6 +47,11 @@ Unreleased
   `Model._create_table_sql(db_name, capabilities)`, `Engine._create_table_sql(db_name, capabilities)` and
   `Field._get_sql(with_default_expression, capabilities)`. Overrides of the old public methods that expect a
   `Database` argument will no longer be called with one
+- `Codec` API: `encode_inserts(model_class, instances, batch_size)` replaces `encode` / `insert_format` (which remain
+  on `TSVCodec`), `decode` / `decode_rows` receive the driver response instead of lines, and `select_format` may be
+  `None`. `Database.codec` is now taken from `Database.driver.codec`
+- `Database.db_url` is `None` when a custom driver is given; passing `db_url`, `username` or `password` together
+  with `driver` raises a `ValueError`
 
 v3.2.0
 ------

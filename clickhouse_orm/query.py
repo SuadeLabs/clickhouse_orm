@@ -345,6 +345,11 @@ class QuerySet:
         # Backwards-compatible alias for the executor
         return self._executor
 
+    def __deepcopy__(self, memo):
+        # Querysets are never modified in place (their methods return modified copies), so a shallow copy suffices.
+        # This also shares the executor, which holds the connections to the server, with querysets used as values.
+        return copy(self)
+
     def _compiling(self):
         """
         Context for generating the SQL to execute: yields the `QueryParams` collecting the bound values

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from copy import deepcopy
 
 from clickhouse_orm.database import Database
 from clickhouse_orm.engines import ReplacingMergeTree
@@ -114,6 +115,16 @@ class QuerySetWithExecutorTestCase(unittest.TestCase):
                 "SELECT count() FROM (SELECT `date`, `name`, `value`\nFROM `event`\nLIMIT 0, 5)",
             ],
         )
+
+    def test_deepcopy_shares_executor(self):
+        qs = self.qs.filter(name="a").order_by("date")
+        copied = deepcopy(qs)
+        self.assertIsNot(copied, qs)
+        self.assertIs(copied._executor, self.executor)
+        self.assertEqual(copied.as_sql(), qs.as_sql())
+        # Querysets used as filter values are copied along with the conditions
+        outer = self.qs.filter(name__in=qs.only("name"))
+        self.assertEqual(outer.filter(value=1).as_sql().count("`event`"), 2)
 
     def test_paginate(self):
         self.executor.count_result = 25
