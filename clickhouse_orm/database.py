@@ -2,88 +2,17 @@ from __future__ import annotations
 
 import datetime
 import logging
-import re
 from math import ceil
 from string import Template
 
 import pytz
-import requests
 
+from .driver import Driver, RequestsDriver
+from .exceptions import DatabaseException, ServerError
 from .models import ModelBase
 from .utils import Page, import_submodules, parse_tsv
 
 logger = logging.getLogger("clickhouse_orm")
-
-
-class DatabaseException(Exception):  # noqa: N818
-    """
-    Raised when a database operation fails.
-    """
-
-
-class ServerError(DatabaseException):
-    """
-    Raised when a server returns an error.
-    """
-
-    def __init__(self, message):
-        self.code = None
-        processed = self.get_error_code_msg(message)
-        if processed:
-            self.code, self.message = processed
-        else:
-            # just skip custom init
-            # if non-standard message format
-            self.message = message
-            super().__init__(message)
-
-    ERROR_PATTERNS = (
-        # ClickHouse prior to v19.3.3
-        re.compile(
-            r"""
-            Code:\ (?P<code>\d+),
-            \ e\.displayText\(\)\ =\ (?P<type1>[^ \n]+):\ (?P<msg>.+?),
-            \ e.what\(\)\ =\ (?P<type2>[^ \n]+)
-        """,
-            re.VERBOSE | re.DOTALL,
-        ),
-        # ClickHouse v19.3.3+
-        re.compile(
-            r"""
-            Code:\ (?P<code>\d+),
-            \ e\.displayText\(\)\ =\ (?P<type1>[^ \n]+):\ (?P<msg>.+)
-        """,
-            re.VERBOSE | re.DOTALL,
-        ),
-        # ClickHouse v21+
-        re.compile(
-            r"""
-            Code:\ (?P<code>\d+).
-            \ (?P<type1>[^ \n]+):\ (?P<msg>.+)
-        """,
-            re.VERBOSE | re.DOTALL,
-        ),
-    )
-
-    @classmethod
-    def get_error_code_msg(cls, full_error_message):
-        """
-        Extract the code and message of the exception that clickhouse-server generated.
-
-        See the list of error codes here:
-        https://github.com/yandex/ClickHouse/blob/master/dbms/src/Common/ErrorCodes.cpp
-        """
-        for pattern in cls.ERROR_PATTERNS:
-            match = pattern.match(full_error_message)
-            if match:
-                # assert match.group('type1') == match.group('type2')
-                return int(match.group("code")), match.group("msg").strip()
-
-        return 0, full_error_message
-
-    def __str__(self):
-        if self.code is not None:
-            return f"{self.message} ({self.code})"
 
 
 class Database:
@@ -124,10 +53,13 @@ class Database:
         self.db_url = db_url or self._default_url
         self.readonly = False
         self.timeout = timeout
-        self.request_session = requests.Session()
-        self.request_session.verify = verify_ssl_cert
-        if username:
-            self.request_session.auth = (username, password or "")
+        self.driver: Driver = RequestsDriver(
+            self.db_url,
+            username=username,
+            password=password,
+            timeout=timeout,
+            verify_ssl_cert=verify_ssl_cert,
+        )
         self.log_statements = log_statements
         self.settings = {}
         self.db_exists = False  # this is required before running _is_existing_database
@@ -185,8 +117,7 @@ class Database:
         Note that this only checks for existence of a table with the expected name.
         """
         sql = "SELECT count() FROM system.tables WHERE database = '%s' AND name = '%s'"
-        r = self._send(sql % (self.db_name, model_class.table_name()))
-        return r.text.strip() == "1"
+        return self._scalar(sql % (self.db_name, model_class.table_name())) == "1"
 
     def get_model_for_table(self, table_name, system_table=False):
         """
@@ -241,15 +172,14 @@ class Database:
 
         fields_list = ",".join(["`%s`" % name for name in first_instance.fields(writable=True)])
         fmt = "TSKV" if model_class.has_funcs_as_defaults() else "TabSeparated"
-        query = "INSERT INTO $table (%s) FORMAT %s\n" % (fields_list, fmt)
+        query = self._substitute("INSERT INTO $table (%s) FORMAT %s" % (fields_list, fmt), model_class)
 
         def gen():
             buf = BytesIO()
-            buf.write(self._substitute(query, model_class).encode("utf-8"))
             first_instance.set_database(self)
             buf.write(first_instance.to_db_string())
             # Collect lines in batches of batch_size
-            lines = 2
+            lines = 1
             for instance in i:
                 instance.set_database(self)
                 buf.write(instance.to_db_string())
@@ -264,7 +194,7 @@ class Database:
             if lines:
                 yield buf.getvalue()
 
-        self._send(gen())
+        self._send(query, data=gen())
 
     def count(self, model_class, conditions=None):
         """
@@ -281,8 +211,8 @@ class Database:
                 conditions = conditions.to_sql(model_class)
             query += " WHERE " + str(conditions)
         query = self._substitute(query, model_class)
-        r = self._send(query)
-        return int(r.text) if r.text else 0
+        result = self._scalar(query)
+        return int(result) if result else 0
 
     def select(self, query, model_class=None, settings=None):
         """
@@ -295,7 +225,7 @@ class Database:
         """
         query += " FORMAT TabSeparatedWithNamesAndTypes"
         query = self._substitute(query, model_class)
-        r = self._send(query, settings, True)
+        r = self._send(query, settings=settings, stream=True)
         lines = r.iter_lines()
         field_names = parse_tsv(next(lines))
         field_types = parse_tsv(next(lines))
@@ -392,16 +322,20 @@ class Database:
         query = self._substitute(query, MigrationHistory)
         return set(obj.module_name for obj in self.select(query))
 
-    def _send(self, data, settings=None, stream=False):
-        if isinstance(data, str):
-            data = data.encode("utf-8")
-            if self.log_statements:
-                logger.info(data)
-        params = self._build_params(settings)
-        r = self.request_session.post(self.db_url, params=params, data=data, stream=stream, timeout=self.timeout)
-        if r.status_code != 200:
-            raise ServerError(r.text)
-        return r
+    @property
+    def request_session(self):
+        """The `requests.Session` used by the default `RequestsDriver`. Kept for backwards compatibility."""
+        return self.driver.session
+
+    def _send(self, query, data=None, settings=None, stream=False):
+        if self.log_statements:
+            logger.info(query)
+        return self.driver.send(query, data=data, settings=self._build_params(settings), stream=stream)
+
+    def _scalar(self, query, settings=None):
+        if self.log_statements:
+            logger.info(query)
+        return self.driver.scalar(query, settings=self._build_params(settings))
 
     def _build_params(self, settings):
         params = dict(settings or {})
@@ -429,28 +363,24 @@ class Database:
 
     def _get_server_timezone(self):
         try:
-            r = self._send("SELECT timezone()")
-            return pytz.timezone(r.text.strip())
+            return pytz.timezone(self._scalar("SELECT timezone()"))
         except ServerError as e:
             logger.exception("Cannot determine server timezone (%s), assuming UTC", e)
             return pytz.utc
 
     def _get_server_version(self, as_tuple=True):
         try:
-            r = self._send("SELECT version();")
-            ver = r.text
+            ver = self._scalar("SELECT version();")
         except ServerError as e:
             logger.exception("Cannot determine server version (%s), assuming 1.1.0", e)
             ver = "1.1.0"
         return tuple(int(n) for n in ver.split(".") if n.isdigit()) if as_tuple else ver
 
     def _is_existing_database(self):
-        r = self._send("SELECT count() FROM system.databases WHERE name = '%s'" % self.db_name)
-        return r.text.strip() == "1"
+        return self._scalar("SELECT count() FROM system.databases WHERE name = '%s'" % self.db_name) == "1"
 
     def _is_connection_readonly(self):
-        r = self._send("SELECT value FROM system.settings WHERE name = 'readonly'")
-        return r.text.strip() != "0"
+        return self._scalar("SELECT value FROM system.settings WHERE name = 'readonly'") != "0"
 
 
 # Expose only relevant classes in import *

@@ -1,6 +1,14 @@
 Change Log
 ==========
 
+Unreleased
+----------
+- All HTTP I/O now goes through a pluggable `Driver` (`clickhouse_orm.driver`); `Database.driver` defaults to `RequestsDriver`
+- `DatabaseException` and `ServerError` moved to `clickhouse_orm.exceptions` (still importable from `clickhouse_orm.database`)
+- `Database.request_session` is now a read-only property proxying `Database.driver.session`
+- INSERT statements are now logged when `log_statements=True`
+- bugfix: `Database.server_version` no longer drops the final version component
+
 v3.2.0
 ------
 - bugfix: revert changes to session handling
