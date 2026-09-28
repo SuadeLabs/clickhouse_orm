@@ -223,7 +223,9 @@ Values use the same Python types as `clickhouse_driver`:
   [DateTimeField and Time Zones](field_types.md#datetimefield-and-time-zones)
 - `Enum` values are returned as their name (`str`), `Bool` as `bool`, `Nullable` NULLs as `None`
 - `FixedString` values have trailing null bytes removed; strings which are not valid UTF-8 are returned as `bytes`
-- Types which are not parsed yet (`Tuple`, `Map`, nested arrays, `JSON`, ...) are returned as their text representation
+- `Array` values are lists and `Tuple` values are tuples (named tuples included), with their elements typed by the
+  same rules; nested arrays and tuples are supported
+- Types which are not parsed yet (`Map`, `JSON`, `Dynamic`, ...) are returned as their text representation
   (the [native driver](#the-native-driver) returns them as Python objects)
 
 SQL Placeholders
@@ -329,8 +331,8 @@ with the default driver. The differences are:
 - Results are read in full before they are returned, so large results are held in memory. Like
   `clickhouse_driver.Client`, a driver must not be used by several threads at once.
 - `raw` returns an approximation of the `TabSeparated` output, and any `FORMAT` clause in the query is ignored.
-- `select_rows` returns values of every type as Python objects (e.g. tuples, dicts and nested lists), where the
-  default driver returns the text of types it does not parse.
+- `select_rows` returns values of every type as Python objects (e.g. dicts for maps), where the default driver
+  returns the text of types it does not parse.
 - Query parameters require a server version which supports them over the native protocol; older servers raise
   a `DatabaseException`.
 

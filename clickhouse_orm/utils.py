@@ -100,8 +100,9 @@ def parse_tsv(line: bytes | str) -> list[str]:
     return [unescape(value) for value in split_tsv(line)]
 
 
-# An array item: a quoted string (group 1) or an unquoted value (group 2), followed by a comma or the end (group 3)
-_ARRAY_ITEM = re.compile(r"\s*(?:'((?:[^'\\]|\\.)*)'|([^,']*?))\s*(,|$)", re.DOTALL)
+_QUOTED_ITEM = re.compile(r"'((?:[^'\\]|\\.)*)'", re.DOTALL)
+_UNQUOTED_ITEM = re.compile(r"[^,'\[\](){}]*")
+_CLOSING_BRACKETS = {"[": "]", "(": ")", "{": "}"}
 
 
 def parse_array(array_string: str) -> list[Any]:
@@ -110,28 +111,117 @@ def parse_array(array_string: str) -> list[Any]:
         "['hello', 'world']" ==> ["hello", "world"]
         "(1,2,3)"            ==> ["1", "2", "3"]
         "[1,NULL]"           ==> ["1", None]
+        "[(1,'a'),[2]]"      ==> ["(1,'a')", "[2]"]
 
-    Quoted values are unescaped. The string must be in ClickHouse's quoted text format, as in SQL and in
-    the TSV cells of arrays (which, unlike other cells, are not escaped for TSV).
+    Quoted values are unescaped, and nested arrays, tuples and maps are returned as their text, to be parsed by the
+    field of the element. The string must be in ClickHouse's quoted text format, as in SQL and in the TSV cells of
+    arrays and tuples (which, unlike other cells, are not escaped for TSV).
     """
-    if len(array_string) < 2 or array_string[0] not in "[(" or array_string[-1] not in "])":
+    if len(array_string) < 2 or _CLOSING_BRACKETS.get(array_string[0]) != array_string[-1] or array_string[0] == "{":
         raise ValueError('Invalid array string: "%s"' % array_string)
     values: list[Any] = []
     pos, end = 1, len(array_string) - 1
     if not array_string[pos:end].strip():
         return values
     while True:
-        match = _ARRAY_ITEM.match(array_string, pos, end)
-        if match is None or (match.group(1) is None and not match.group(2)):
-            raise ValueError('Invalid array string: "%s"' % array_string)
-        quoted, unquoted, separator = match.groups()
-        if quoted is not None:
-            values.append(codecs.escape_decode(quoted.encode("utf-8"))[0].decode("utf-8"))
+        pos = _skip_spaces(array_string, pos, end)
+        char = array_string[pos] if pos < end else ""
+        if char == "'":
+            match = _QUOTED_ITEM.match(array_string, pos, end)
+            if match is None:
+                raise ValueError('Invalid array string: "%s"' % array_string)
+            values.append(codecs.escape_decode(match.group(1).encode("utf-8"))[0].decode("utf-8"))
+            pos = match.end()
+        elif char in _CLOSING_BRACKETS:
+            item_end = _composite_end(array_string, pos, end)
+            values.append(array_string[pos:item_end])
+            pos = item_end
         else:
-            values.append(None if unquoted == "NULL" else unquoted)
-        if not separator:
+            match = _UNQUOTED_ITEM.match(array_string, pos, end)
+            item = match.group().strip()
+            if not item:
+                raise ValueError('Invalid array string: "%s"' % array_string)
+            values.append(None if item == "NULL" else item)
+            pos = match.end()
+        pos = _skip_spaces(array_string, pos, end)
+        if pos == end:
             return values
-        pos = match.end()
+        if array_string[pos] != ",":
+            raise ValueError('Invalid array string: "%s"' % array_string)
+        pos += 1
+        # A trailing comma is allowed in single-element tuples, e.g. "(1,)"
+        if array_string[0] == "(" and len(values) == 1 and _skip_spaces(array_string, pos, end) == end:
+            return values
+
+
+def _skip_spaces(text: str, pos: int, end: int) -> int:
+    while pos < end and text[pos].isspace():
+        pos += 1
+    return pos
+
+
+def _composite_end(text: str, start: int, end: int) -> int:
+    """Returns the position after the array, tuple or map starting at `start`, skipping over quoted strings."""
+    stack = []
+    pos = start
+    while pos < end:
+        char = text[pos]
+        if char == "'":
+            match = _QUOTED_ITEM.match(text, pos, end)
+            if match is None:
+                break
+            pos = match.end()
+            continue
+        if char in _CLOSING_BRACKETS:
+            stack.append(_CLOSING_BRACKETS[char])
+        elif char in ")]}":
+            if char != stack.pop():
+                break
+            if not stack:
+                return pos + 1
+        pos += 1
+    raise ValueError('Invalid array string: "%s"' % text)
+
+
+def split_type_args(args: str) -> list[str]:
+    """Splits the arguments of a parametric type, e.g. `"sum, Array(UInt8)"`, on top-level commas."""
+    parts, depth, start, quoted = [], 0, 0, False
+    for i, char in enumerate(args):
+        if char == "'" and (i == 0 or args[i - 1] != "\\"):
+            quoted = not quoted
+        elif quoted:
+            continue
+        elif char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+        elif char == "," and depth == 0:
+            parts.append(args[start:i].strip())
+            start = i + 1
+    parts.append(args[start:].strip())
+    return parts if parts != [""] else []
+
+
+_TUPLE_ELEMENT_NAME = re.compile(r"(`(?:[^`\\]|\\.)*`|[A-Za-z_][A-Za-z0-9_]*)\s+(\S.*)", re.DOTALL)
+
+
+def parse_tuple_type(db_type: str) -> list[tuple[str | None, str]]:
+    """
+    Returns the `(name, type)` pairs of the elements of a `Tuple` type, with `None` names for unnamed elements.
+    For example `"Tuple(a UInt8, b Nullable(String))"` ==> `[("a", "UInt8"), ("b", "Nullable(String)")]`.
+    """
+    elements = []
+    for element in split_type_args(db_type[len("Tuple(") : -1]):
+        # Unnamed element types never start with an identifier followed by a space (e.g. "Decimal(9, 2)")
+        match = _TUPLE_ELEMENT_NAME.fullmatch(element)
+        if match:
+            name = match.group(1)
+            if name.startswith("`"):
+                name = codecs.escape_decode(name[1:-1].encode("utf-8"))[0].decode("utf-8")
+            elements.append((name, match.group(2)))
+        else:
+            elements.append((None, element))
+    return elements
 
 
 def import_submodules(package_name: str) -> dict[str, ModuleType]:

@@ -1161,6 +1161,18 @@ Extends Field
 #### StringField(default=None, alias=None, materialized=None, readonly=None, codec=None)
 
 
+### TupleField
+
+Extends Field
+
+
+A `Tuple` column. `inner_fields` lists the fields of the elements, or `(name, field)` pairs for a named tuple
+(e.g. `Tuple(a UInt8, b String)`). Values are Python tuples, like in `clickhouse_driver`; named tuples can also
+be assigned a dict of the elements by name. The default is a tuple of the elements' defaults.
+
+#### TupleField(inner_fields, default=None, alias=None, materialized=None, readonly=None, codec=None)
+
+
 ### UInt16Field
 
 Extends BaseIntField

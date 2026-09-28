@@ -36,6 +36,8 @@ from clickhouse_orm.fields import (
     LowCardinalityField,
     NullableField,
     StringField,
+    TupleField,
+    UInt8Field,
     UInt64Field,
     UUIDField,
 )
@@ -100,6 +102,8 @@ class AllTypes(Model):
     strings = ArrayField(StringField())
     nullable_floats = ArrayField(NullableField(Float32Field()))
     flag = BooleanField()
+    pair = TupleField([("colour", NullableField(Enum8Field(Colour))), ("f32", Float32Field())])
+    tuples = ArrayField(TupleField([StringField(), DateTimeField(), ArrayField(NullableField(UInt8Field()))]))
 
     engine = Memory()
 
@@ -132,6 +136,8 @@ def _all_types_instances():
             strings=["a'b", "back\\slash\\", "\\'", "tab\t", "NULL", "", "[', ']"],
             nullable_floats=[0.1, None],
             flag=True,
+            pair=(Colour.red, 1.7),
+            tuples=[("a'b\\", moment, [1, None]), ("(,)", moment, [])],
         ),
         AllTypes(id=2, nullable=0.3, flag=False),
     ]
@@ -491,12 +497,16 @@ class CrossDriverTestCase(_NativeTestCase):
     def test_select_rows(self):
         self.http.insert(_all_types_instances())
         flag = "toBool(flag)" if self.http.server_version >= (21, 12) else "flag"
-        query = f"SELECT * EXCEPT (flag), {flag}, CAST(1 AS Int128), [[1]], NULL FROM $db.alltypes ORDER BY id"
+        nested = "[[1]], (1, 'a', [(2, [NULL, 1.5])], tuple(toFloat32(1.7)))"
+        has_map = self.http.server_version >= (21, 12)
+        mapping = "map('a', 1)" if has_map else "'{''a'':1}'"
+        query = f"SELECT * EXCEPT (flag), {flag}, CAST(1 AS Int128), {nested}, NULL, {mapping} FROM $db.alltypes ORDER BY id"
         http_result = self.http.select_rows(query)
         native_result = self.native.select_rows(query)
         self.assertEqual(native_result.columns, http_result.columns)
         http_rows, native_rows = list(http_result), list(native_result)
-        # Types which the TSV codec cannot parse (such as nested arrays) are returned as text
-        self.assertEqual([row[-2] for row in http_rows], ["[[1]]"] * 2)
-        self.assertEqual([row[-2] for row in native_rows], [[[1]]] * 2)
-        self.assertEqual([row[:-2] + row[-1:] for row in native_rows], [row[:-2] + row[-1:] for row in http_rows])
+        self.assertEqual([row[-4:-1] for row in http_rows], [([[1]], (1, "a", [(2, [None, 1.5])], (1.7,)), None)] * 2)
+        # Types which the TSV codec cannot parse (such as maps) are returned as text
+        self.assertEqual([row[-1] for row in http_rows], ["{'a':1}"] * 2)
+        self.assertEqual([row[-1] for row in native_rows], [{"a": 1} if has_map else "{'a':1}"] * 2)
+        self.assertEqual([row[:-1] for row in native_rows], [row[:-1] for row in http_rows])

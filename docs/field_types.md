@@ -32,6 +32,7 @@ The following field types are supported:
 | Enum8Field         | Enum8      | Enum                  | See below
 | Enum16Field        | Enum16     | Enum                  | See below
 | ArrayField         | Array      | list                  | See below
+| TupleField         | Tuple      | tuple                 | See below
 | NullableField      | Nullable   | See below             | See below
 
 
@@ -127,6 +128,31 @@ data = SensorData(date=date.today(), temperatures=[25.5, 31.2, 28.7], humidity_l
 ```
 
 Note that multidimensional arrays are not supported yet by the ORM.
+
+Working with tuple fields
+-------------------------
+
+A `TupleField` holds a fixed number of elements, each with its own field. Pass a list of fields, or a list of `(name, field)` pairs for a named tuple:
+
+```python
+class Measurement(Model):
+
+    date = DateField()
+    location = TupleField([Float64Field(), Float64Field()])                        # Tuple(Float64, Float64)
+    reading = TupleField([('sensor', StringField()), ('value', NullableField(Float32Field()))])
+    history = ArrayField(TupleField([DateTimeField(), Float32Field()]))
+
+    engine = MergeTree('date', ('date',))
+
+m = Measurement(date=date.today(), location=(51.5, -0.12), reading={'sensor': 'a1', 'value': None})
+m.reading   # ('a1', None)
+```
+
+Values are Python tuples, as in `clickhouse_driver`, and each element is converted by its field (so enum elements are enum members, datetimes follow the [time zone rules](#datetimefield-and-time-zones), and so on). A list can be assigned too, and named tuples also accept a dict of the elements by name. The default value is a tuple of the elements' defaults.
+
+Tuple fields can contain arrays and other tuples, and can be used as the elements of arrays. They can be compared in querysets (e.g. `filter(location=(51.5, -0.12))`), including as [query parameters](models_and_databases.md#query-parameters).
+
+Note that older ClickHouse versions (e.g. 21.3) store an array of *named* tuples as `Nested` columns (one array column per element, such as `history.when` and `history.value`) unless the `flatten_nested` setting is disabled, so use unnamed tuples in arrays when targeting them.
 
 Working with nullable fields
 ----------------------------

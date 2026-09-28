@@ -9,10 +9,10 @@ import pytz
 
 from .compiler import qualified_name, resolve_ddl_target
 from .engines import Distributed, Merge
-from .fields import ArrayField, Field, StringField
+from .fields import ArrayField, Field, StringField, TupleField
 from .funcs import F
 from .query import QuerySet
-from .utils import NO_VALUE, arg_to_sql, get_subclass_names, split_tsv, unescape
+from .utils import NO_VALUE, arg_to_sql, get_subclass_names, parse_tuple_type, split_tsv, unescape
 
 logger = getLogger("clickhouse_orm")
 
@@ -221,17 +221,13 @@ class ModelBase(type):
             if isinstance(inner_field, orm_fields.ArrayField):
                 raise NotImplementedError("No field class for multidimensional arrays - %s" % db_type)
             return orm_fields.ArrayField(inner_field)
-        # Tuples (poor man's version - convert to array)
-        if db_type.startswith("Tuple"):
-            types = [s.strip() for s in db_type[6:-1].split(",")]
-            # newer versions are essentially "named tuples"
-            if any(" " in t for t in types):
-                assert all(" " in t for t in types), "Either all or none of the tuple types must be named - " + db_type
-                types = [t.split(" ", 1)[1] for t in types]
-
-            assert len(set(types)) == 1, "No support for mixed types in tuples - " + db_type
-            inner_field = cls.create_ad_hoc_field(types[0])
-            return orm_fields.ArrayField(inner_field)
+        # Tuples, possibly named (e.g. "Tuple(a UInt8, b String)")
+        if db_type.startswith("Tuple("):
+            elements = parse_tuple_type(db_type)
+            inner_fields = [cls.create_ad_hoc_field(element_type) for _, element_type in elements]
+            if elements and elements[0][0] is not None:
+                return orm_fields.TupleField(list(zip([name for name, _ in elements], inner_fields)))
+            return orm_fields.TupleField(inner_fields)
         # FixedString
         if db_type.startswith("FixedString"):
             length = int(db_type[12:-1])
@@ -410,9 +406,11 @@ class Model(metaclass=ModelBase):
         for name in field_names:
             field = getattr(cls, name)
             field_timezone = getattr(field, "timezone", None) or timezone_in_use
-            # Arrays are written in their quoted form, which parse_array unescapes, rather than escaped for TSV
+            # Arrays and tuples are written in their quoted form, which parse_array unescapes, rather than escaped
+            # for TSV
             value = next(values)
-            kwargs[name] = field.to_python(value if isinstance(field, ArrayField) else unescape(value), field_timezone)
+            quoted = isinstance(field, (ArrayField, TupleField))
+            kwargs[name] = field.to_python(value if quoted else unescape(value), field_timezone)
 
         obj = cls(**kwargs)
         if database is not None:

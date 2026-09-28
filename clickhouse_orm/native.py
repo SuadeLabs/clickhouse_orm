@@ -29,7 +29,7 @@ from .compiler import quote_identifier
 from .driver import Driver
 from .exceptions import DatabaseException, ServerError
 from .models import ModelBase
-from .utils import NO_VALUE, escape, unescape
+from .utils import NO_VALUE, escape, parse_tuple_type, unescape
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Iterator, Mapping
@@ -246,6 +246,11 @@ def _value_encoder(field: Field) -> Callable[[Any], Any] | None:
     if isinstance(field, orm_fields.ArrayField):
         inner = _value_encoder(field.inner_field)
         return (lambda value: [inner(item) for item in value]) if inner else None
+    if isinstance(field, orm_fields.TupleField):
+        encoders = [_value_encoder(inner_field) for inner_field in field.inner_fields]
+        if not any(encoders):
+            return None
+        return lambda value: tuple(encode(item) if encode else item for encode, item in zip(encoders, value))
     if isinstance(field, orm_fields.NullableField):
         inner = _value_encoder(field.inner_field)
         null_values = field._null_values
@@ -278,6 +283,8 @@ def _needs_to_python(field: Field) -> bool:
     """Whether the values of `field` returned by `clickhouse_driver` must be converted by `to_python` with a timezone."""
     if isinstance(field, _WRAPPER_FIELDS) and _is_builtin(field):
         return _needs_to_python(field.inner_field)
+    if isinstance(field, orm_fields.TupleField) and _is_builtin(field):
+        return any(_needs_to_python(inner_field) for inner_field in field.inner_fields)
     return not _is_builtin(field)
 
 
@@ -315,6 +322,13 @@ def _value_normalizer(db_type: str) -> Callable[[Any], Any] | None:
     if db_type.startswith("Array("):
         inner = _value_normalizer(db_type[6:-1])
         return (lambda value: [None if item is None else inner(item) for item in value]) if inner else None
+    if db_type.startswith("Tuple("):
+        normalizers = [_value_normalizer(element_type) for _, element_type in parse_tuple_type(db_type)]
+        if not any(normalizers):
+            return None
+        return lambda value: tuple(
+            normalize(item) if normalize and item is not None else item for normalize, item in zip(normalizers, value)
+        )
     return _shortest_float32 if db_type == "Float32" else None
 
 

@@ -12,9 +12,9 @@ from typing import TYPE_CHECKING, Any
 import pytz
 
 from .compiler import quote_identifier
-from .fields import ArrayField, BaseEnumField
+from .fields import BaseEnumField
 from .models import Model, ModelBase
-from .utils import parse_array, parse_tsv, unescape
+from .utils import parse_array, parse_tsv, parse_tuple_type, split_type_args, unescape
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Iterator
@@ -166,7 +166,7 @@ class TSVCodec(Codec):
 
 
 # Types the ORM cannot parse yet are returned as their ClickHouse text representation
-_TEXT_TYPE_PREFIXES = ("Tuple(", "Map(", "Nested(", "Variant(", "Dynamic", "JSON", "Object(", "AggregateFunction(")
+_TEXT_TYPE_PREFIXES = ("Map(", "Nested(", "Variant(", "Dynamic", "JSON", "Object(", "AggregateFunction(")
 _DATETIME_TYPE = re.compile(r"\bDateTime(64)?\b")
 _QUOTED_STRING = re.compile(r"'(?:[^'\\]|\\.)*'")
 _QUOTED_TYPE_PREFIXES = ("Array(", "Tuple(", "Map(", "Nested(")
@@ -181,32 +181,13 @@ def _decode_string(value: bytes) -> str | bytes:
         return value
 
 
-def _split_type_args(args: str) -> list[str]:
-    """Splits the arguments of a parametric type, e.g. `"sum, Array(UInt8)"`, on top-level commas."""
-    parts, depth, start, quoted = [], 0, 0, False
-    for i, char in enumerate(args):
-        if char == "'" and (i == 0 or args[i - 1] != "\\"):
-            quoted = not quoted
-        elif quoted:
-            continue
-        elif char == "(":
-            depth += 1
-        elif char == ")":
-            depth -= 1
-        elif char == "," and depth == 0:
-            parts.append(args[start:i].strip())
-            start = i + 1
-    parts.append(args[start:].strip())
-    return parts
-
-
 def _is_quoted_type(db_type: str) -> bool:
     """
     Whether TSV cells of `db_type` are written in the quoted text format, without escaping them for TSV: this is
     the case for composite types such as arrays, whose elements are quoted and escaped as in SQL.
     """
     if db_type.startswith("SimpleAggregateFunction("):
-        return _is_quoted_type(_split_type_args(db_type[24:-1])[1])
+        return _is_quoted_type(split_type_args(db_type[24:-1])[1])
     return db_type.startswith(_QUOTED_TYPE_PREFIXES)
 
 
@@ -241,7 +222,7 @@ def _row_converter(db_type: str, timezone: datetime.tzinfo) -> Callable[[bytes],
         if db_type.startswith(wrapper):
             return _row_converter(db_type[len(wrapper) : -1], timezone)
     if db_type.startswith("SimpleAggregateFunction("):
-        return _row_converter(_split_type_args(db_type[24:-1])[1], timezone)
+        return _row_converter(split_type_args(db_type[24:-1])[1], timezone)
     if db_type == "String" or db_type.startswith(_TEXT_TYPE_PREFIXES):
         return _decode_string
     if db_type.startswith("FixedString("):
@@ -254,16 +235,22 @@ def _row_converter(db_type: str, timezone: datetime.tzinfo) -> Callable[[bytes],
         return lambda value: datetime.date.fromisoformat(value.decode())
     if db_type == "Nothing":
         return lambda value: None
+    if db_type.startswith("Array("):
+        # Convert the elements like values of the inner type (e.g. enums to names and datetimes to naive datetimes)
+        convert = _row_converter(db_type[len("Array(") : -1], timezone)
+        return lambda value: [None if item is None else convert(item.encode()) for item in parse_array(value.decode())]
+    if db_type.startswith("Tuple("):
+        # Each element is converted like a value of its type (elements of unsupported types are returned as text)
+        converters = [_row_converter(element_type, timezone) for _, element_type in parse_tuple_type(db_type)]
+        return lambda value: tuple(
+            None if item is None else convert(item.encode())
+            for convert, item in zip(converters, parse_array(value.decode()))
+        )
     try:
         field = ModelBase.create_ad_hoc_field(db_type)
     except (NotImplementedError, AssertionError):
-        # Unsupported types (e.g. nested arrays) are rejected by the field classes with either exception
+        # Unsupported types (e.g. Map or Dynamic) are rejected by the field classes with either exception
         return _decode_string
-    if isinstance(field, ArrayField):
-        # Convert the elements like values of the inner type (e.g. enums to names and datetimes to naive datetimes)
-        inner_type = db_type[len("Array(") : -1]
-        convert = _row_converter(inner_type, timezone)
-        return lambda value: [None if item is None else convert(item.encode()) for item in parse_array(value.decode())]
     if isinstance(field, BaseEnumField):
         return lambda value: field.to_python(value.decode(), timezone).name
     # Datetimes are naive, unless the column has a timezone (which the ad-hoc field then has too)

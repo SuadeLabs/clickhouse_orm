@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime
+import re
 from calendar import timegm
 from decimal import Decimal, localcontext
 from ipaddress import IPv4Address, IPv6Address
@@ -585,6 +586,85 @@ class ArrayField(Field):
         if with_default_expression and self.codec and capabilities and capabilities.has_codec_support:
             sql += " CODEC(%s)" % self.codec
         return sql
+
+
+class TupleField(Field):
+    """
+    A `Tuple` column. `inner_fields` lists the fields of the elements, or `(name, field)` pairs for a named tuple
+    (e.g. `Tuple(a UInt8, b String)`). Values are Python tuples, like in `clickhouse_driver`; named tuples can also
+    be assigned a dict of the elements by name. The default is a tuple of the elements' defaults.
+    """
+
+    def __init__(self, inner_fields, default=None, alias=None, materialized=None, readonly=None, codec=None):
+        inner_fields = list(inner_fields)
+        named = [isinstance(item, tuple) for item in inner_fields]
+        assert all(named) or not any(named), "Either all or none of the elements of TupleField must be named"
+        if any(named):
+            self.names = [name for name, _ in inner_fields]
+            inner_fields = [field for _, field in inner_fields]
+            assert all(isinstance(name, str) and name for name in self.names), "Tuple element names must be strings"
+            assert len(set(self.names)) == len(self.names), "Tuple element names must be unique"
+        else:
+            self.names = None
+        assert all(isinstance(field, Field) for field in inner_fields), (
+            "The first argument of TupleField must be a list of Field instances or (name, Field) pairs"
+        )
+        self.inner_fields = inner_fields
+        self.class_default = tuple(field.default for field in inner_fields)
+        super().__init__(default, alias, materialized, readonly, codec)
+
+    def to_python(self, value, timezone_in_use):
+        if isinstance(value, bytes):
+            value = value.decode("utf-8")
+        if isinstance(value, str):
+            if not value.startswith("("):
+                raise ValueError("Invalid value for TupleField: %r" % value)
+            value = parse_array(value)
+        elif isinstance(value, dict) and self.names is not None:
+            if set(value) != set(self.names):
+                raise ValueError("TupleField expects a dict with the keys %s, not %s" % (self.names, list(value)))
+            value = [value[name] for name in self.names]
+        elif not isinstance(value, (list, tuple)):
+            raise ValueError("TupleField expects a tuple or list, not %s" % type(value))
+        if len(value) != len(self.inner_fields):
+            raise ValueError("TupleField expects %d elements, not %d" % (len(self.inner_fields), len(value)))
+        return tuple(field.to_python(v, timezone_in_use) for field, v in zip(self.inner_fields, value))
+
+    def validate(self, value):
+        for field, v in zip(self.inner_fields, value):
+            field.validate(v)
+
+    def to_db_string(self, value, quote=True):
+        # Like arrays, the same text is used in SQL, TSV and query parameters. A trailing comma makes single-element
+        # tuples valid in SQL, where "(1)" is not a tuple
+        items = [field.to_db_string(v, quote=True) for field, v in zip(self.inner_fields, value)]
+        text = ",".join("NULL" if item == "\\N" else item for item in items)
+        return "(%s,)" % text if len(items) == 1 else "(%s)" % text
+
+    def _element_types(self, types):
+        if self.names is None:
+            return types
+        return ["%s %s" % (_tuple_element_name(name), db_type) for name, db_type in zip(self.names, types)]
+
+    def _param_type(self):
+        types = []
+        for field in self.inner_fields:
+            inner_type = field._param_type()
+            types.append("Nullable(%s)" % inner_type if field._is_nullable() else inner_type)
+        return "Tuple(%s)" % comma_join(self._element_types(types))
+
+    def _get_sql(self, with_default_expression, capabilities):
+        types = [field._get_sql(False, capabilities) for field in self.inner_fields]
+        sql = "Tuple(%s)" % comma_join(self._element_types(types))
+        if with_default_expression:
+            sql += self._extra_params(capabilities)
+        return sql
+
+
+def _tuple_element_name(name):
+    if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+        return name
+    return "`%s`" % name.replace("\\", "\\\\").replace("`", "\\`")
 
 
 class UUIDField(Field):

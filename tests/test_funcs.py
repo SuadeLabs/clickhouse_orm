@@ -741,14 +741,14 @@ class FuncsTestCase(TestCaseWithData):
         )
         self._test_func(
             F.IPv4CIDRToRange(F.toIPv4("192.168.5.2"), 16),
-            [IPv4Address("192.168.0.0"), IPv4Address("192.168.255.255")],
+            (IPv4Address("192.168.0.0"), IPv4Address("192.168.255.255")),
         )
         self._test_func(
             F.IPv6CIDRToRange(F.toIPv6("2001:0db8:0000:85a3:0000:0000:ac1f:8001"), 32),
-            [
+            (
                 IPv6Address("2001:db8::"),
                 IPv6Address("2001:db8:ffff:ffff:ffff:ffff:ffff:ffff"),
-            ],
+            ),
         )
 
     def test_aggregate_funcs(self):

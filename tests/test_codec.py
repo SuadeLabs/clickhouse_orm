@@ -130,7 +130,7 @@ class TSVCodecRowsTestCase(unittest.TestCase):
                 None,
                 True,
                 5,
-                "(1,'a')",
+                (1, "a"),
                 3,
                 [1, 2],
             ),
@@ -161,8 +161,23 @@ class TSVCodecRowsTestCase(unittest.TestCase):
         ((strings, nulls, pair, agg),) = TSVCodec().decode_rows(_response(lines), self.tz)
         self.assertEqual(strings, ["a'b", "\\", "NULL", None, "\t"])
         self.assertEqual(nulls, [None])
-        self.assertEqual(pair, "('a\\'b','c\\\\d')")
+        self.assertEqual(pair, ("a'b", "c\\d"))
         self.assertEqual(agg, ["\\"])
+
+    def test_tuple_elements(self):
+        # Elements are typed like values of their types, including in arrays of (named) tuples
+        lines = [
+            b"t	at	one	unsupported",
+            b"Tuple(a Enum8(\\'x\\' = 1), b Nullable(DateTime), c Array(UInt8), d Tuple(String, Bool))"
+            b"	Array(Tuple(UInt8, String))	Tuple(UInt8)	Tuple(Map(String, UInt8))",
+            b"('x',NULL,[1,2],('(,)',true))	[(1,'a'),(2,'b')]	(1)	({'k':1})",
+        ]
+        ((value, array, single, unsupported),) = TSVCodec().decode_rows(_response(lines), self.tz)
+        self.assertEqual(value, ("x", None, [1, 2], ("(,)", True)))
+        self.assertEqual(array, [(1, "a"), (2, "b")])
+        self.assertEqual(single, (1,))
+        # Elements of types which the TSV codec cannot parse are returned as text
+        self.assertEqual(unsupported, ("{'k':1}",))
 
     def test_explicit_timezone_column(self):
         lines = [b"dt", b"DateTime(\\'Asia/Tokyo\\')", b"2020-01-01 12:00:00"]
@@ -182,8 +197,12 @@ class TSVCodecRowsTestCase(unittest.TestCase):
         self.assertEqual((result.columns, list(result)), ([("x", "UInt8")], []))
 
     def test_unsupported_types_as_text(self):
-        lines = [b"m\tnested", b"Map(String, UInt8)\tArray(Array(UInt8))", b"{'a':1}\t[[1],[2]]"]
-        self.assertEqual(list(TSVCodec().decode_rows(_response(lines))), [("{'a':1}", "[[1],[2]]")])
+        lines = [b"m\tarray", b"Map(String, UInt8)\tArray(Map(String, UInt8))", b"{'a':1}\t[{'b':2}]"]
+        self.assertEqual(list(TSVCodec().decode_rows(_response(lines))), [("{'a':1}", ["{'b':2}"])])
+
+    def test_nested_arrays(self):
+        lines = [b"nested", b"Array(Array(Nullable(String)))", b"[['a',NULL],[],['[\\'b\\']']]"]
+        self.assertEqual(list(TSVCodec().decode_rows(_response(lines))), [([["a", None], [], ["['b']"]],)])
 
     def test_is_lazy(self):
         def lines():

@@ -277,10 +277,6 @@ class DatabaseTestCase(TestCaseWithData):
         for row in self.database.select(query):
             if row.type.startswith(("Map", "Array(Map")):
                 continue  # Not supported yet
-            if row.type.startswith("Array(Tuple"):
-                continue  # Not supported yet
-            if row.type == "Tuple(UInt64, UInt64, UUID)":
-                continue  # Not supported yet
             if row.type in ("Bool", "UInt128", "Array(Dynamic)", "Array(Array(String))"):
                 continue  # Not supported yet (found in newer servers, e.g. 26.8)
             ModelBase.create_ad_hoc_field(row.type)
@@ -288,7 +284,7 @@ class DatabaseTestCase(TestCaseWithData):
     def test_create_ad_hoc_field__unsupported(self):
         from clickhouse_orm.models import ModelBase
 
-        for db_type in ("Array(Array(String))", "Array(Tuple(name String, type String))", "Dynamic"):
+        for db_type in ("Array(Array(String))", "Tuple(a Map(String, String))", "Dynamic"):
             with self.assertRaises(NotImplementedError):
                 ModelBase.create_ad_hoc_field(db_type)
 
@@ -312,8 +308,6 @@ class DatabaseTestCase(TestCaseWithData):
                 continue  # Since zookeeper/certificates not set up in our tests
             if row.name == "disks":
                 continue  # Contains is_read_only field which overwrites method
-            if row.name in ("dropped_tables_parts", "parts", "settings_changes", "tables"):
-                continue  # Contains mixed tuple types which are not supported yet
             if row.name in ("models", "symbols"):
                 continue  # Doesn't appear to work locally
 

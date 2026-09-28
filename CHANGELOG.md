@@ -38,9 +38,16 @@ Unreleased
 - The test suite can be run against the native driver with `pytest --driver=native`
 - CI tests against ClickHouse 21.3, 25.8 and 26.8 (20.8 is no longer tested). Locally, the version of the temporary
   test container can be chosen with `CLICKHOUSE_VERSION` (default 25.8)
-- `Model.create_ad_hoc_field` raises `NotImplementedError` for multidimensional arrays (e.g. `Array(Array(String))`
-  or `Array(Tuple(...))`) rather than failing an assertion, so `get_model_for_table` reports them like other
-  unsupported types
+- `Model.create_ad_hoc_field` raises `NotImplementedError` for multidimensional arrays (e.g. `Array(Array(String))`)
+  rather than failing an assertion, so `get_model_for_table` reports them like other unsupported types
+- New `TupleField` for `Tuple` columns, named or not (see "Working with tuple fields" in the docs). Values are Python
+  tuples, whose elements can be of any type (including arrays and tuples), and arrays of tuples are supported. Query
+  results, `get_model_for_table` and system models now read tuple columns of mixed types (e.g. `system.parts`,
+  `system.tables` and `system.settings_changes`, which previously could not be loaded)
+- `select_rows` parses `Tuple` values into tuples and nested arrays into nested lists (with the default driver too),
+  matching `clickhouse_driver`
+- `parse_array` handles nested arrays, tuples and maps (returned as their text), and single-element tuples such as
+  `(1,)`. New `parse_tuple_type` and `split_type_args` helpers in `clickhouse_orm.utils`
 - bugfix: deep-copying a `QuerySet` (e.g. when used as a subquery filter) no longer copies its database
 - bugfix: `select_rows` array elements are now typed like `clickhouse_driver` (e.g. enum names, naive datetimes)
 - bugfix: arrays of `Nullable` fields containing `None` could not be inserted or read (NULLs inside arrays are now
@@ -80,6 +87,9 @@ Unreleased
     `dt.replace(tzinfo=None)`), or give the field a timezone (e.g. `DateTimeField(timezone='UTC')`, which changes the
     column type to `DateTime('UTC')`) to keep reading aware values. On other servers, check any code which relied
     on naive values meaning UTC
+- `Tuple` columns in query results are now read as tuples by `TupleField` (previously, tuples whose elements all had
+  the same type were read as lists by an `ArrayField`, and other tuples could not be read). This includes function
+  results, e.g. `IPv4CIDRToRange` now returns a tuple of addresses rather than a list
 
 v3.2.0
 ------
