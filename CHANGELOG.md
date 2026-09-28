@@ -1,7 +1,7 @@
 Change Log
 ==========
 
-Unreleased
+v4.0.0
 ----------
 - All HTTP I/O now goes through a pluggable `Driver` (`clickhouse_orm.driver`); `Database.driver` defaults to `RequestsDriver`
 - `DatabaseException` and `ServerError` moved to `clickhouse_orm.exceptions` (still importable from `clickhouse_orm.database`)
